@@ -38,6 +38,7 @@ _fails = {}
 _audit_lock = threading.Lock()
 
 NEW_PASSWORD_ALPHABET = 'abcdefghijkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789'
+BOOK_LABELS = {'sales': '销售', 'stock': '库存', 'egg': '放蛋'}
 
 
 # --------------------------------------------------------------------------- #
@@ -149,20 +150,25 @@ def ledger_stats(payload):
     result = {}
     if not isinstance(payload, dict):
         return result
-    for book in ('sales', 'stock'):
+    for book in BOOK_LABELS:
         data = payload.get(book) or {}
         items = data.get('items') or []
         records = data.get('records') or []
-        totals = {}
-        for rec in records:
-            if rec.get('kind') == 'count' and rec.get('itemId'):
-                totals[rec['itemId']] = totals.get(rec['itemId'], 0) + (rec.get('delta') or 0)
+        totals = item_totals(data)
         result[book] = {
             'items': len(items),
             'records': len(records),
             'lines': [{'name': str(i.get('name') or ''), 'total': totals.get(i.get('id'), 0)}
-                      for i in items][:60],
+                      for i in items],
         }
+        if book == 'egg':
+            ratios = [(i, i.get('ratio')) for i in items
+                      if isinstance(i.get('ratio'), int) and i['ratio'] > 0]
+            completed = min((totals.get(i.get('id'), 0) // ratio for i, ratio in ratios), default=0)
+            result[book]['round'] = completed
+            result[book]['total'] = sum(totals.get(i.get('id'), 0) for i in items)
+            for line, item in zip(result[book]['lines'], items):
+                line['ratio'] = item.get('ratio')
     return result
 
 
@@ -181,7 +187,7 @@ def fetch_ledgers(ids):
 def item_totals(book):
     totals = {}
     for rec in (book.get('records') or []):
-        if rec.get('kind') == 'count' and rec.get('itemId'):
+        if rec.get('kind') in ('count', 'set') and rec.get('itemId'):
             totals[rec['itemId']] = totals.get(rec['itemId'], 0) + (rec.get('delta') or 0)
     return totals
 
@@ -233,7 +239,7 @@ def export_csv(username, payload):
     out = io.StringIO()
     writer = csv.writer(out, lineterminator='\r\n')
     writer.writerow(['记录时间', '账本', '物品', '数量变化', '类型'])
-    for book_key, label in (('sales', '销售'), ('stock', '库存')):
+    for book_key, label in BOOK_LABELS.items():
         book = payload.get(book_key) or {}
         names = {item.get('id'): (item.get('name') or '') for item in (book.get('items') or [])}
         records = sorted(book.get('records') or [], key=lambda r: r.get('at') or 0)
@@ -242,7 +248,7 @@ def export_csv(username, payload):
                              rec.get('delta', ''), rec.get('kind', '')])
     writer.writerow([])
     writer.writerow(['物品汇总', '账本', '物品', '当前数量', ''])
-    for book_key, label in (('sales', '销售'), ('stock', '库存')):
+    for book_key, label in BOOK_LABELS.items():
         book = payload.get(book_key) or {}
         totals = item_totals(book)
         for item in (book.get('items') or []):
@@ -547,7 +553,10 @@ class Handler(BaseHTTPRequestHandler):
                 if re.match(r'^[0-9a-fA-F-]{36}$', text) and text not in ids:
                     ids.append(text)
             ids = ids[:40]
-            book = body.get('book') if body.get('book') in ('sales', 'stock') else 'stock'
+            book = body.get('book', 'stock')
+            if not isinstance(book, str) or book not in BOOK_LABELS:
+                self._json(400, {'error': 'INVALID_BOOK'})
+                return
             op = 'diff' if body.get('op') == 'diff' else 'sum'
             if not ids:
                 self._json(400, {'error': 'NO_ACCOUNTS'})

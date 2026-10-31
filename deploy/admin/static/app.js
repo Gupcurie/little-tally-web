@@ -3,6 +3,7 @@
 const $ = (id) => document.getElementById(id);
 let ACCOUNTS = [];
 const SELECTED = new Set();
+const BOOK_LABELS = { sales: '销售账本', stock: '库存账本', egg: '放蛋账本' };
 
 function cookie(name) {
   for (const part of document.cookie.split(';')) {
@@ -140,6 +141,8 @@ function renderRows() {
 
     const usage = el('div', 'cell usage');
     usage.appendChild(el('span', null, account.items + ' 物品 / ' + account.records + ' 记录'));
+    const egg = (account.books || {}).egg;
+    if (egg) usage.appendChild(el('span', 'muted small', '放蛋：' + egg.items + ' 物品 / ' + egg.records + ' 记录'));
     usage.appendChild(el('span', 'muted small', account.revision === null ? '无账本' : 'rev ' + account.revision));
     row.appendChild(usage);
 
@@ -290,9 +293,10 @@ function openDetail(account) {
   const books = account.books || {};
   for (const key of Object.keys(books)) {
     const book = books[key];
-    const title = key === 'sales' ? '销售账本' : '库存账本';
+    const title = BOOK_LABELS[key] || key;
     const section = el('section', 'book');
     section.appendChild(el('h3', null, title + ' · ' + book.items + ' 物品 / ' + book.records + ' 记录'));
+    if (key === 'egg') section.appendChild(el('p', 'muted small', '总数 ' + (book.total || 0) + ' 个 · 已完成 ' + (book.round || 0) + ' 轮'));
     if (!book.lines.length) {
       section.appendChild(el('p', 'muted', '没有物品'));
     } else {
@@ -300,7 +304,7 @@ function openDetail(account) {
       for (const line of book.lines) {
         const item = el('li');
         item.appendChild(el('span', null, line.name || '(未命名)'));
-        item.appendChild(el('strong', null, String(line.total)));
+        item.appendChild(el('strong', null, String(line.total) + (key === 'egg' && line.ratio ? ' · 比例 ' + line.ratio : '')));
         list.appendChild(item);
       }
       section.appendChild(list);
@@ -330,7 +334,7 @@ async function runAggregate(op) {
 }
 
 function renderAggregate(data) {
-  const bookLabel = data.book === 'sales' ? '销售账本' : '库存账本';
+  const bookLabel = BOOK_LABELS[data.book] || data.book;
   $('a-title').textContent = (data.op === 'diff' ? '相减 ' : '相加汇总 · ') + bookLabel;
 
   const body = $('a-body');
