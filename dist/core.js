@@ -20,6 +20,8 @@ const hourFormatter=new Intl.DateTimeFormat('en-GB',{timeZone:ZONE,hour:'2-digit
 export function day(at){return dayFormatter.format(at);}
 export function clock(at,full=false){return clockFormatters[full?1:0].format(at);}
 export function hour(at){return Number(hourFormatter.format(at));}
+const minuteFormatter=new Intl.DateTimeFormat('en-GB',{timeZone:ZONE,minute:'2-digit',hourCycle:'h23'});
+export function minute(at){return Number(minuteFormatter.format(at));}
 export function todayRecords(book,now=Date.now()){const key=day(now);return book.records.filter(r=>day(r.at)===key);}
 function requireThat(test,message){if(!test)throw new Error(message);}
 function validID(value){return typeof value==='string'&&/^[a-zA-Z0-9_-]{1,80}$/.test(value);}

@@ -103,3 +103,25 @@ body.egg-screen main{height:calc(100dvh - 76px);overflow:hidden;padding:8px 10px
 .egg-title .icon.tiny{width:15px;height:15px;color:#8a9790}
 .egg-photo-row{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:12px}
 @media(max-width:360px){.bottom-nav button .icon{width:18px;height:18px}.bottom-nav button span{font-size:9px}}
+/* ---------------- 导航：5/6 个都等分 ---------------- */
+.bottom-nav{display:flex;align-items:stretch}
+.bottom-nav button{flex:1 1 0;min-width:0;touch-action:manipulation;-webkit-user-select:none;user-select:none;-webkit-touch-callout:none}
+.bottom-nav.dragging button{transition:transform .12s}
+.bottom-nav button.drag-target{background:#e8f0e3;border-radius:12px}
+
+/* ---------------- 统计：堆叠时段图 ---------------- */
+.stacked-chart{display:flex;align-items:flex-end;gap:2px;height:150px;padding-top:6px}
+.stacked-chart .hour-col{flex:1;display:flex;flex-direction:column;justify-content:flex-end;gap:1px;min-width:0;background:none;border:0;padding:0;height:100%}
+.stacked-chart .seg{width:100%;border-radius:2px;min-height:2px}
+.legend{display:flex;flex-wrap:wrap;gap:6px;margin-top:10px}
+.legend button{display:inline-flex;align-items:center;gap:5px;border:1px solid #e2e7e0;background:#fff;color:#3b4a42;border-radius:999px;padding:5px 9px;font-size:11px}
+.legend button.on{background:#e8f0e3;border-color:#bfd4c4}
+.legend .swatch{width:9px;height:9px;border-radius:3px;display:inline-block}
+
+/* ---------------- 设置：顺序列表 ---------------- */
+.order-row{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:7px 0;border-bottom:1px solid #eef1ec}
+.order-row:last-child{border-bottom:0}
+.order-buttons{display:flex;gap:6px}
+.order-buttons button{min-width:38px;height:32px;padding:0}
+.bottom-nav button{touch-action:none}
+.stacked-chart .hour-col.on{background:#eef3ec;border-radius:6px}
