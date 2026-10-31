@@ -223,29 +223,42 @@ export function eggRecommendationSet(egg,count=4,random=eggRandom){
   const left=j.left-(j.id===i.id?1:0),limit=j.id===i.id?Math.floor((slots-1)/2):Math.ceil((slots-1)/2);
   return left<=limit;
  }));
- // 分层随机出场时刻：周期 T/r，下一次的理想位置 (已出+.5)*T/r。
- // 在理想位置附近随机浮动，避免固定顺序，又不把稀有项过早耗光。
- const scheduled=eligible.map(i=>{
-  const period=totalRatio/i.ratio;
-  const due=(i.progress+0.5)*period+(random()-0.5)*2*Math.min(2,period*0.3);
-  return {...i,period,due};
- });
+ const scheduled=eligible.map(i=>({...i,period:totalRatio/i.ratio,
+  cooldown:Math.max(1,Math.floor(totalRatio/i.ratio*0.65)),
+  deficit:(placed+1)*i.ratio/totalRatio-i.progress}));
  const feasibleIDs=new Set(feasible.map(i=>i.id));
- let preferred=feasible.length?scheduled.filter(i=>feasibleIDs.has(i.id)):scheduled;
- // 先应用跨轮间隔，再比较虚拟时刻；不能因为换轮后时刻重置而紧接着出稀有项。
- const spaced=preferred.filter(i=>(gaps.get(i.id)??Infinity)>=Math.max(1,Math.floor(i.period*0.65)));
+ const dominant=Math.max(...items.map(i=>i.ratio))/totalRatio>0.5;
+ // 过半占比允许少量连出，避免把 5:3:1 强行锁成 A-B-A-C-A-B-A-B-A。
+ let preferred=!dominant&&feasible.length?scheduled.filter(i=>feasibleIDs.has(i.id)):scheduled;
+ // 为同种物品后续的最小间隔预留位置，防止拖到轮尾后被迫扎堆。
+ const urgent=scheduled.filter(i=>slots<=1+(i.left-1)*i.cooldown&&(gaps.get(i.id)??Infinity)>=i.cooldown);
+ if(urgent.length)preferred=urgent;
+ const spaced=preferred.filter(i=>(gaps.get(i.id)??Infinity)>=i.cooldown);
  if(spaced.length)preferred=spaced;
- // 只在相差两次拿取以内的候选中打散，不能为打散而提前耗掉后半轮配额。
- const earliest=Math.min(...preferred.map(i=>i.due));
- preferred=preferred.filter(i=>i.due<=earliest+2);
- const noRepeat=preferred.filter(i=>i.id!==recent[0]);if(noRepeat.length)preferred=noRepeat;
+ const lastShare=(items.find(i=>i.id===recent[0])?.ratio||0)/totalRatio;
+ const noRepeat=preferred.filter(i=>i.id!==recent[0]);
+ if(lastShare<=0.5&&noRepeat.length)preferred=noRepeat;
  if(recent.length===3&&recent[0]===recent[2]&&recent[0]!==recent[1]){
-  const varied=preferred.filter(i=>i.id!==recent[1]);if(varied.length)preferred=varied;
+  const varied=preferred.filter(i=>i.id!==recent[1]&&i.deficit>=-0.75);if(varied.length)preferred=varied;
  }
  const preferredIDs=new Set(preferred.map(i=>i.id));
- return scheduled.map(i=>({id:i.id,name:i.name,ratio:i.ratio,round,score:-i.due,
-  deficit:(placed+1)*i.ratio/totalRatio-i.progress,preferred:preferredIDs.has(i.id),
-  reason:'按比例间隔随机穿插'}))
+ // 最大熵加权抽样：P(i) ∝ 剩余配额 × exp(进度纠偏 - 连出代价 - 扎堆代价)。
+ // Gumbel-max 直接从这份概率分布抽取，不是固定时刻排队或只在平分时随机。
+ const repeatsAfter=i=>Math.max(0,...scheduled.map(j=>{
+  const left=j.left-(i.id===j.id?1:0),others=slots-1-left;
+  return left-others-(i.id===j.id?0:1);
+ }));
+ const unavoidable=Math.min(...scheduled.map(repeatsAfter));
+ return scheduled.map(i=>{
+  const share=i.ratio/totalRatio,gap=gaps.get(i.id)??Infinity;
+  const repeat=i.id===recent[0]?2*(1-share):0;
+  const crowding=2*Math.max(0,1-gap/i.period)**2;
+  const future=2*(repeatsAfter(i)-unavoidable);
+  const logWeight=Math.log(i.left)+1.1*i.deficit-repeat-crowding-future;
+  const u=Math.min(1-Number.EPSILON,Math.max(Number.EPSILON,random()));
+  return {id:i.id,name:i.name,ratio:i.ratio,round,score:logWeight-Math.log(-Math.log(u)),
+   deficit:i.deficit,preferred:preferredIDs.has(i.id),reason:'按剩余配额随机穿插'};
+ })
   .sort((a,b)=>Number(b.preferred)-Number(a.preferred)||b.score-a.score).slice(0,Math.max(0,count));
 }
 export function eggRecommend(egg,{random=eggRandom}={}){return eggRecommendationSet(egg,1,random)[0]||null;}

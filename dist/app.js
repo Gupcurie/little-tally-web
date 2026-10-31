@@ -225,7 +225,7 @@ function eggCard(p,egg){
   </button>
   <div class="egg-progress" role="progressbar" aria-valuemin="0" aria-valuemax="${p.target}" aria-valuenow="${p.progress}"><span style="width:${pct}%"></span></div>
   <div class="egg-foot">
-   <span class="egg-timer" data-timer="${e(p.id)}">${sinceText(C.eggLastChange(egg,p.id))}</span>
+   <span class="egg-timer" data-timer="${e(p.id)}" data-timer-prefix="距上次 ">距上次 ${sinceText(C.eggLastChange(egg,p.id))}</span>
    ${state.eggArrange?`<span class="egg-move">
      <button data-action="egg-move" data-id="${e(p.id)}" data-step="-cols" aria-label="上移">▲</button>
      <button data-action="egg-move" data-id="${e(p.id)}" data-step="-1" aria-label="左移">◀</button>
@@ -295,20 +295,20 @@ function fitEggGrid(){
  const gap=parseFloat(getComputedStyle(grid).gap)||6;let best=null;
  for(let columns=1;columns<=Math.min(count,6);columns++){
   const rows=Math.ceil(count/columns),w=(width-gap*(columns-1))/columns,h=(height-gap*(rows-1))/rows;
-  if(w<100&&columns>1)continue;
-  const buttonW=(w-16-6)/2,buttonH=Math.min(48,Math.max(28,h-25));
-  const score=Math.min(1,buttonW/44,buttonH/44)+0.08*Math.min(1,w/140,h/140)-(rows*columns-count)*0.04-Math.abs(w-h)*0.00015;
+  if(w<92&&columns>1)continue;
+  const buttonW=(w-16-6)/2,buttonH=Math.min(48,Math.max(28,h-52));
+  const score=Math.min(1,buttonW/44,buttonH/44)+0.08*Math.min(1,w/140,h/140)-(rows*columns-count)*0.04-Math.abs(w-h)*0.00015-Math.max(0,96-h)*0.04;
   if(!best||score>best.score)best={columns,rows,score};
  }
  if(!best)return;
  grid.style.setProperty('--egg-columns',best.columns);grid.style.setProperty('--egg-rows',best.rows);
- grid.classList.toggle('egg-grid-tight',(height-gap*(best.rows-1))/best.rows<76);
+ grid.classList.toggle('egg-grid-tight',(height-gap*(best.rows-1))/best.rows<112);
  for(const card of cards)card.style.gridColumn='';
  const remainder=count%best.columns;if(remainder)cards.at(-1).style.gridColumn='span '+(best.columns-remainder+1);
  state.eggCols=best.columns;
 }
 function eggTick(){
- for(const node of main.querySelectorAll('[data-timer]')){node.textContent=sinceText(Number(node.dataset.at)||C.eggLastChange(eggBook(),node.dataset.timer));}
+ for(const node of main.querySelectorAll('[data-timer]')){node.textContent=(node.dataset.timerPrefix||'')+sinceText(Number(node.dataset.at)||C.eggLastChange(eggBook(),node.dataset.timer));}
 }
 async function mutateEgg(fn){await ledger.commit(s=>fn(C.ensureEgg(s)));state.eggDraft=null;state.eggPick=null;render();}
 async function compressImage(file){

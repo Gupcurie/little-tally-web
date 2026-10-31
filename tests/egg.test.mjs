@@ -354,3 +354,33 @@ test('taking a non-recommended item recalculates from actual counts and actual r
   assert.equal(page.calculations, 3);
   assert.notEqual(page.selection, beforeUndo);
 });
+
+test('dominant ratios do not collapse random rounds into a few fixed alternating patterns', () => {
+  for (const [ratios, minimum] of [[[5, 3, 1], 20], [[6, 3, 1], 25]]) {
+    const orders = new Set();
+    for (let seed = 1; seed <= 80; seed++) orders.add(simulate(ratios, seed, 1).join(','));
+    assert.ok(orders.size >= minimum, `${ratios}: only ${orders.size} distinct orders`);
+  }
+});
+
+test('weighted sampling stays finite even at the random generator boundaries', () => {
+  const egg = freshEgg([['甲', 5], ['乙', 3], ['丙', 1]]);
+  for (const random of [() => 0, () => 1]) {
+    const picks = C.eggRecommendationSet(egg, 3, random);
+    assert.equal(picks.length, 3);
+    assert.ok(picks.every(p => Number.isFinite(p.score)));
+  }
+});
+
+test('production sampling obtains fresh Web Crypto randomness without Math.random', t => {
+  const original=globalThis.crypto.getRandomValues.bind(globalThis.crypto);
+  let calls=0;
+  t.mock.method(globalThis.crypto,'getRandomValues',array=>{calls++;return original(array);});
+  t.mock.method(Math,'random',()=>{throw new Error('insecure random fallback');});
+  const egg=freshEgg([['甲',5],['乙',3],['丙',1]]);
+  assert.ok(C.eggRecommend(egg));
+  const first=calls;
+  assert.ok(first>=3);
+  assert.ok(C.eggRecommend(egg));
+  assert.ok(calls>first,'a new calculation must obtain new system randomness');
+});
