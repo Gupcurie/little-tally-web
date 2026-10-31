@@ -24,3 +24,33 @@ The certificate and local HTTPS trust checks succeeded. Cloud-browser verificati
 The final encrypted source snapshot has now been synchronized and verified, preserving original account IDs, password hashes, ledgers and backup payloads. Source write and registration RPCs remain revoked to prevent split data. The target write and registration grants are restored, the public IP and legacy frontend origins are allowed, and numeric/alphabetic registration, login, saves, account isolation and relogin persistence passed against the updated service. A protected database dump was taken before enabling the target. The legacy frontend configuration is switched to this same backend.
 
 `prepare-final-sync.py` supports transactional rollback validation and explicit commit. It requires the target application write lock, rejects a newer or conflicting target ledger, upserts original account IDs and password hashes, and verifies all source ledger and backup payloads. Complete the last source snapshot and verification before restoring the new site's write grants or updating the live frontend configuration.
+
+## Proxied API returned 502 after the gateway container was recreated
+
+Symptom: registration and login failed with the generic "registration did not finish" message; `https://43.142.19.116/functions/v1/tally-accounts` returned an HTML `502 Bad Gateway`, while `http://127.0.0.1:8000/functions/v1/tally-accounts` still answered correctly. Nginx logged `connect() failed (111: Connection refused) while connecting to upstream`.
+
+Cause: `proxy_pass http://api-gw:8000;` names a host, and nginx resolves that name once while loading the configuration, then keeps the address forever. Recreating the `api-gw` (Envoy) container changed its Docker IP from `172.18.0.4` to `172.18.0.5`, so nginx kept dialling the dead address. Nothing was wrong with the password rules, the phone, or the network.
+
+Fix: the API gateway is now reached through an upstream that re-resolves at run time via Docker's embedded DNS. `private-web.conf` (and therefore the generated `ip-test-web.conf`) contains:
+
+```nginx
+resolver 127.0.0.11 valid=10s ipv6=off;
+
+upstream tally_api_gw {
+    zone tally_api_gw 64k;
+    server api-gw:8000 resolve;
+}
+```
+
+and every proxied location uses `proxy_pass http://tally_api_gw;` — the same request URI, query string, `Host`, `X-Forwarded-For` and `X-Forwarded-Proto` behaviour as before, and the same `404` for `/auth/v1/admin/` and any `/functions/` path other than `tally-accounts`. `resolve` needs nginx 1.27.3 or newer; the deployed image is pinned to nginx 1.30.6.
+
+Rules for future changes:
+
+- Never write a container IP into these files, and never let a `proxy_pass` inside the proxied locations name `api-gw:8000` literally again — that reintroduces the stale-address failure.
+- `private-web.conf` is the source of truth; `configure-ip-test.py` derives `ip-test-web.conf` from it, so a fix applied to one file only will survive regeneration only if it is in the source.
+- After editing either file run `docker compose exec -T web nginx -t`, then `docker compose exec -T web nginx -s reload` (a reload re-reads the configuration; it does not drop connections).
+- Keep `/auth/v1/admin/` unreachable from the public entry. Administrator calls belong on the loopback gateway.
+
+Verification that was actually performed: `smoke-test-https.py` runs the registration, login, save, retry, revision-conflict, isolation, logout and re-login checks through the real HTTPS entry with certificate verification, and keeps the administrator calls on `127.0.0.1:8000`. A separate isolated probe recreated a container behind both the old literal `proxy_pass` and the new resolved upstream: the old form returned `502` for the rest of the run, the new form recovered within ten seconds and stayed healthy.
+
+Still not verified: how the certificate renewal behaves at a real expiry, and browser/device behaviour across models. Do not claim those are covered.
