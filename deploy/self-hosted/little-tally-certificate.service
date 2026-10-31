@@ -1,0 +1,10 @@
+[Unit]
+Description=Renew Little Tally temporary IP HTTPS certificate
+After=docker.service network-online.target
+Wants=network-online.target
+Requires=docker.service
+
+[Service]
+Type=oneshot
+UMask=0077
+ExecStart=/opt/little-tally/renew-ip-certificate.sh

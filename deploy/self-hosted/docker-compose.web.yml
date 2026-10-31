@@ -1,0 +1,23 @@
+services:
+  web:
+    image: ${TALLY_NGINX_IMAGE:?Set a verified nginx image digest}
+    container_name: little-tally-web
+    restart: unless-stopped
+    depends_on:
+      api-gw:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:8080:80"
+    volumes:
+      - /opt/little-tally/app/dist:/usr/share/nginx/html:ro
+      - /opt/little-tally/stack/private-web.conf:/etc/nginx/conf.d/default.conf:ro
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1/health.json"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
