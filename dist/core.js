@@ -1,0 +1,103 @@
+export const MAX = 999999999;
+export const ZONE = 'Asia/Shanghai';
+export const uid = () => {
+ if(globalThis.crypto.randomUUID)return globalThis.crypto.randomUUID();
+ const b=globalThis.crypto.getRandomValues(new Uint8Array(16));b[6]=(b[6]&15)|64;b[8]=(b[8]&63)|128;
+ const s=Array.from(b,x=>x.toString(16).padStart(2,'0')).join('');return `${s.slice(0,8)}-${s.slice(8,12)}-${s.slice(12,16)}-${s.slice(16,20)}-${s.slice(20)}`;
+};
+const names = ['娃衣','T恤','鼠标垫','扑克牌','掼蛋纸牌','盆栽','拼图','冰箱贴','便利贴'];
+export const emptyBook = book => ({book,items:[],records:[],goal:null});
+export function initialBook(book) { return {...emptyBook(book),items:names.map((name,i)=>({id:uid(),name,color:i,created:Date.now(),breakdown:book==='stock'&&name==='娃衣'?{'未拆':0,'已拆':0}:{}}))}; }
+export function initialState(){ return {format:'little-tally-pocket',version:1,revision:0,sales:initialBook('sales'),stock:initialBook('stock')}; }
+export const clone = value => structuredClone(value);
+export function counts(book){const result=Object.fromEntries(book.items.map(i=>[i.id,0]));for(const r of book.records)result[r.itemId]=(result[r.itemId]||0)+r.delta;return result;}
+export const sum = values => values.reduce((a,b)=>a+b,0);
+export const total = book => sum(Object.values(counts(book)));
+export const partsTotal = item => sum(Object.values(item.breakdown));
+const dayFormatter=new Intl.DateTimeFormat('en-CA',{timeZone:ZONE,year:'numeric',month:'2-digit',day:'2-digit'});
+const clockFormatters=[false,true].map(full=>new Intl.DateTimeFormat('zh-CN',{timeZone:ZONE,year:full?'numeric':undefined,month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',second:'2-digit',hourCycle:'h23'}));
+const hourFormatter=new Intl.DateTimeFormat('en-GB',{timeZone:ZONE,hour:'2-digit',hourCycle:'h23'});
+export function day(at){return dayFormatter.format(at);}
+export function clock(at,full=false){return clockFormatters[full?1:0].format(at);}
+export function hour(at){return Number(hourFormatter.format(at));}
+export function todayRecords(book,now=Date.now()){const key=day(now);return book.records.filter(r=>day(r.at)===key);}
+function requireThat(test,message){if(!test)throw new Error(message);}
+function validID(value){return typeof value==='string'&&/^[a-zA-Z0-9_-]{1,80}$/.test(value);}
+function validTime(value){return Number.isSafeInteger(value)&&value>=0&&value<=8640000000000000;}
+export function numberInput(text){requireThat(typeof text==='string'&&/^\d+$/.test(text.trim()),'请输入 0 至 999999999 的整数。');const n=Number(text.trim());requireThat(Number.isSafeInteger(n)&&n>=0&&n<=MAX,'数量超出范围。');return n;}
+export function validateBook(book){
+ requireThat(book&&['sales','stock'].includes(book.book)&&Array.isArray(book.items)&&Array.isArray(book.records),'账本格式不正确。');
+ requireThat(book.items.length<=200&&book.records.length<=200000,'物品或历史记录超过上限。');
+ const ids=new Set(),labels=new Set(),recordIDs=new Set();
+ for(const i of book.items){requireThat(i&&validID(i.id)&&!ids.has(i.id)&&typeof i.name==='string'&&i.name.trim().length>0&&i.name.length<=40&&!labels.has(i.name)&&validTime(i.created)&&Number.isSafeInteger(i.color),'物品数据无效，或名称／编号重复。');ids.add(i.id);labels.add(i.name);
+  requireThat(i.breakdown&&typeof i.breakdown==='object'&&!Array.isArray(i.breakdown)&&Object.keys(i.breakdown).length<=30,'库存分项格式不正确。');
+  for(const [k,v] of Object.entries(i.breakdown))requireThat(k.length>0&&k.length<=20&&k!=='未分类'&&Number.isSafeInteger(v)&&v>=0&&v<=MAX,'库存分项数据无效。');
+  requireThat(book.book==='stock'||Object.keys(i.breakdown).length===0,'销售账本不能包含库存分项。');
+ }
+ for(const r of book.records){requireThat(r&&validID(r.id)&&!recordIDs.has(r.id)&&ids.has(r.itemId)&&Number.isSafeInteger(r.delta)&&Math.abs(r.delta)<=MAX&&validTime(r.at)&&['count','set'].includes(r.kind),'历史记录无效。');recordIDs.add(r.id);}
+ const values=counts(book);for(const i of book.items)requireThat(values[i.id]>=0&&values[i.id]<=MAX&&Number.isSafeInteger(values[i.id])&&partsTotal(i)<=values[i.id],'总数不能为负、超过上限或小于库存分项合计。');
+ if(book.goal)validateGoal(book,book.goal);
+ return book;
+}
+export function validateState(state){requireThat(state&&state.format==='little-tally-pocket'&&state.version===1&&Number.isSafeInteger(state.revision)&&state.revision>=0&&state.sales?.book==='sales'&&state.stock?.book==='stock','本机记录格式不正确。');validateBook(state.sales);validateBook(state.stock);return state;}
+export function addItem(book,name){name=name.trim();requireThat(name.length>0&&name.length<=40&&!book.items.some(i=>i.name===name)&&book.items.length<200,'请输入不重复的名称，最多 40 字、200 类物品。');book.items.push({id:uid(),name,color:book.items.length,created:Date.now(),breakdown:{}});}
+export function setCount(book,id,value,kind='set'){
+ const item=book.items.find(i=>i.id===id);requireThat(item&&Number.isSafeInteger(value)&&value>=0&&value<=MAX&&value>=partsTotal(item),'数量不能为负、超过上限或低于分项合计。');
+ const delta=value-counts(book)[id];if(delta===0)return;
+ requireThat(book.records.length<200000,'记录已达上限，请先导出备份。');book.records.push({id:uid(),itemId:id,delta,at:Date.now(),kind});
+}
+export function change(book,id,delta){requireThat(delta===1||delta===-1,'加减步长无效。');setCount(book,id,counts(book)[id]+delta,'count');}
+export function setPart(book,id,name,value){
+ const item=book.items.find(i=>i.id===id);requireThat(book.book==='stock'&&item&&typeof name==='string'&&name.length>0&&name.length<=20&&name!=='未分类'&&Number.isSafeInteger(value)&&value>=0&&value<=MAX,'分项名称或数量无效。');
+ requireThat(Object.hasOwn(item.breakdown,name)||Object.keys(item.breakdown).length<30,'最多 30 个库存分项。');
+ const old=Object.hasOwn(item.breakdown,name)?item.breakdown[name]:0,delta=value-old,current=counts(book)[id],free=current-partsTotal(item);
+ const next=current+(delta>0?Math.max(0,delta-free):delta);const before=clone(book);
+ try{Object.defineProperty(item.breakdown,name,{value,writable:true,enumerable:true,configurable:true});setCount(book,id,next);validateBook(book);}catch(e){Object.assign(book,before);throw e;}
+}
+export function deletePart(book,id,name){const item=book.items.find(i=>i.id===id);requireThat(book.book==='stock'&&item,'找不到此库存物品。');delete item.breakdown[name];}
+export function deleteItem(book,id){book.items=book.items.filter(i=>i.id!==id);book.records=book.records.filter(r=>r.itemId!==id);book.goal=null;}
+export function deleteRecords(book,ids){const next={...book,records:book.records.filter(r=>!ids.has(r.id))};validateBook(next);book.records=next.records;}
+export function parseRatio(text,mode){
+ requireThat(typeof text==='string'||typeof text==='number','请输入有效比例。');const value=String(text).trim().replace(',','.');
+ if(mode==='parts'){requireThat(/^\d+$/.test(value),'份数须为整数。');const n=Number(value);requireThat(Number.isSafeInteger(n)&&n>0&&n<=1000000,'比例份数须为 1 至 1000000。');return n;}
+ requireThat(mode==='percent'&&/^\d+(\.\d{1,2})?$/.test(value),'百分比最多保留两位小数。');const [a,b='']=value.split('.');const n=Number(a)*100+Number(b.padEnd(2,'0'));requireThat(Number.isSafeInteger(n)&&n>0&&n<=10000,'百分比须大于 0 且不超过 100%。');return n;
+}
+export function validateGoal(book,goal){
+ requireThat(goal&&['parts','percent'].includes(goal.mode)&&goal.values&&typeof goal.values==='object'&&!Array.isArray(goal.values),'固定目标格式无效。');const entries=Object.entries(goal.values);requireThat(entries.length>0&&entries.every(([id])=>book.items.some(i=>i.id===id)),'请勾选参与的物品。');const values=entries.map(([,v])=>parseRatio(v,goal.mode));
+ if(goal.mode==='percent'){const p=sum(values);requireThat(p<=10000,'目标百分比合计超过 100%。');requireThat(entries.length!==book.items.length||p===10000,'已选择全部物品时，百分比合计须为 100%。');}
+}
+const gcd=(a,b)=>{while(b){[a,b]=[b,a%b];}return a;};
+const ceilDiv=(a,b)=>Math.floor(a/b)+(a%b?1:0);
+export function ratioPlan(book,goal){
+ validateGoal(book,goal);const values=Object.fromEntries(Object.entries(goal.values).map(([id,v])=>[id,parseRatio(v,goal.mode)])),c=counts(book),current=sum(Object.values(c));
+ if(goal.mode==='parts'){
+  const order=book.items.filter(i=>Object.hasOwn(values,i.id)).map(i=>i.id).sort((a,b)=>values[b]-values[a]);let round=Math.max(1,...order.map(id=>Math.floor(c[id]/values[id])));
+  if(order.every(id=>c[id]===round*values[id]))return {additions:{},other:0,total:current,added:0,note:'固定目标已达标'};
+  if(order.every(id=>c[id]>=round*values[id]))round++;
+  for(const id of order){const target=round*values[id],add=target-c[id];if(add>0){requireThat(target<=MAX,'此比例需要超过单项数量上限，请调整比例。');return {additions:{[id]:add},other:0,total:current+add,added:add,note:'本轮先补这一项，补完后自动判断下一项。'};}}
+ }
+ const selectedTotal=sum(Object.values(values)),otherCurrent=sum(Object.entries(c).filter(([id])=>!Object.hasOwn(values,id)).map(([,n])=>n));requireThat(selectedTotal<10000||otherCurrent===0,'其他物品已有数量，请为它们预留百分比。');
+ let quantum=1,lower=0;
+ for(const [id,p] of Object.entries(values)){const d=10000/gcd(p,10000);quantum=quantum/gcd(quantum,d)*d;lower=Math.max(lower,ceilDiv(c[id]*10000,p));}
+ if(selectedTotal<10000)lower=Math.max(lower,ceilDiv(otherCurrent*10000,10000-selectedTotal));
+ const target=ceilDiv(lower,quantum)*quantum,additions={};let selectedTarget=0;for(const [id,p] of Object.entries(values)){const g=gcd(p,10000),n=target/(10000/g)*(p/g);requireThat(Number.isSafeInteger(n)&&n<=MAX,'精确比例需要超过单项数量上限，请调整比例。');additions[id]=n-c[id];selectedTarget+=n;}
+ const other=target-selectedTarget-otherCurrent;requireThat(Number.isSafeInteger(other)&&other>=0&&other<=(book.items.length-Object.keys(values).length)*MAX-otherCurrent,'其他物品的数量空间不足。');
+ return {additions,other,total:target,added:sum(Object.values(additions))+other,note:target===current?'固定目标已达标':'仅增加数量，达到精确百分比的最小整数方案。'};
+}
+export function encodeBook(book){validateBook(book);return JSON.stringify({...book,format:'little-tally-android',version:3},null,2);}
+export function decodeBackup(text,expected){
+ requireThat(new TextEncoder().encode(text).length<=20*1024*1024,'备份不能超过 20 MB。');let b;try{b=JSON.parse(text);}catch{throw new Error('这不是有效的 JSON 备份。');}
+ requireThat(['little-tally-android','little-tally-ios','little-tally-pocket-book'].includes(b?.format)&&Number.isInteger(b.version)&&b.version>0&&b.book===expected,'备份格式不正确，或选错了销售／库存账本。');
+ requireThat(Array.isArray(b.items)&&Array.isArray(b.records),'备份缺少物品或历史。');
+ const book={book:b.book,items:b.items.map(i=>({...i,color:i.color??0,breakdown:i.breakdown??{}})),records:b.records.map(r=>({...r,kind:r.kind??'count'})),goal:b.goal&&Object.keys(b.goal.values??{}).length?{mode:b.goal.mode,values:Object.fromEntries(Object.entries(b.goal.values).map(([k,v])=>[k,String(v)]))}:null};
+ return validateBook(book);
+}
+export class LocalLedger {
+ constructor(storage,key='little-tally-pocket-v1') {this.storage=storage;this.key=key;this.state=initialState();this.raw=null;this.readOnly=false;this.error=null;this.reload();}
+ reload(){try{const raw=this.storage.getItem(this.key);if(raw!==null){this.state=validateState(JSON.parse(raw));this.raw=raw;}else{this.raw=null;}this.readOnly=false;this.error=null;}catch(e){this.readOnly=true;this.error='本地记录未能读取，原文件没有被覆盖。请先导出原文件，再从备份恢复。';}return !this.readOnly;}
+ commit(mutator){requireThat(!this.readOnly,this.error||'数据处于保护状态。');const latest=this.storage.getItem(this.key);if(latest!==this.raw){this.reload();throw new Error('另一个页面更新了记录，已同步，请重试这次操作。');}const next=clone(this.state);mutator(next);next.revision++;validateState(next);const raw=JSON.stringify(next);
+  try{if(this.raw)this.storage.setItem(this.key+'-previous',this.raw);this.storage.setItem(this.key,raw);}catch(e){throw new Error('浏览器未能保存，这次操作没有生效。请检查储存空间并导出备份。');}
+  this.state=next;this.raw=raw;return next;
+ }
+ recover(sales,stock){validateBook(sales);validateBook(stock);requireThat(sales.book==='sales'&&stock.book==='stock','请选择对应的两个账本。');const next={...initialState(),sales,stock},raw=JSON.stringify(next),original=this.storage.getItem(this.key);if(original)this.storage.setItem(this.key+'-unreadable',original);this.storage.setItem(this.key,raw);this.state=next;this.raw=raw;this.readOnly=false;this.error=null;}
+}
