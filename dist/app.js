@@ -27,7 +27,7 @@ const loadEggMode=()=>{try{const raw=localStorage.getItem('little-tally-egg-mode
 const saveEggMode=value=>{try{localStorage.setItem('little-tally-egg-mode',value?'1':'0');}catch{}};
 const loadBooks=()=>{try{const raw=JSON.parse(localStorage.getItem('little-tally-books')||'null');if(raw&&typeof raw==='object')return {sales:raw.sales!==false,stock:raw.stock!==false,egg:raw.egg!==false};}catch{}return {sales:true,stock:true,egg:true};};
 const saveBooks=books=>{try{localStorage.setItem('little-tally-books',JSON.stringify(books));}catch{}};
-Object.assign(state,{eggPick:null,eggOnlyLeft:false,eggItemID:null,eggSelecting:false,eggSelection:new Set(),eggArrange:false,eggDraft:null,eggCols:2,tabDrag:null,books:loadBooks(),eggReroll:0,statsGran:'hour',statsItem:null});
+Object.assign(state,{eggPick:null,eggOnlyLeft:false,eggItemID:null,eggSelecting:false,eggSelection:new Set(),eggArrange:false,eggDraft:null,eggCols:2,tabDrag:null,books:loadBooks(),statsGran:'hour',statsItem:null});
 const enabledBooks=()=>['sales','stock','egg'].filter(k=>state.books[k]);
 const eggMode=()=>enabledBooks().length===1&&state.books.egg;
 let TABS=loadTabs();
@@ -234,11 +234,22 @@ function eggCard(p,egg){
   </div>
  </article>`;
 }
-function eggPickId(egg,byId){
- const pick=C.eggRecommend(egg,{jitter:state.eggReroll?1.4:0});if(!pick)return null;
- if(state.eggReroll){const alt=C.eggRecommendationSet(egg,4).filter(p=>p.id!==C.eggLastPlaced(egg));if(alt.length)return alt[state.eggReroll%alt.length].id;}
- if(byId[pick.id])return pick.id;
- return pick.id;
+function eggPickKey(egg){
+ const counts=C.eggCounts(egg);
+ return JSON.stringify(egg.items.map(i=>[i.id,i.ratio,counts[i.id]]));
+}
+function eggPickId(egg){
+ const key=eggPickKey(egg);
+ if(state.eggPick?.key===key&&egg.items.some(i=>i.id===state.eggPick.id))return state.eggPick.id;
+ state.eggPick=null;
+ return C.eggRecommend(egg)?.id||null;
+}
+function eggReroll(egg){
+ const picks=C.eggRecommendationSet(egg,egg.items.length),current=eggPickId(egg);
+ if(picks.length<2)return false;
+ const next=picks[(picks.findIndex(p=>p.id===current)+1)%picks.length];
+ state.eggPick={key:eggPickKey(egg),id:next.id};
+ return true;
 }
 function eggView(){
  const egg=eggBook();
@@ -251,12 +262,12 @@ function eggView(){
  const byId=Object.fromEntries(progress.map(p=>[p.id,p]));
  const ids=eggOrder(egg).filter(id=>byId[id]);
  const shown=state.eggOnlyLeft?ids.filter(id=>byId[id].left>0):ids;
- const pickId=eggPickId(egg,byId),pick=pickId?byId[pickId]:null;
+ const pickId=eggPickId(egg),pick=pickId?byId[pickId]:null;
  const round=C.eggRound(egg)+off+1;
  const cols=Math.max(1,state.eggCols||1),lone=shown.length>cols-1&&shown.length%cols===1;
  return `<section class="egg-wrap">
   <div class="egg-reco">
-   <div class="egg-reco-main"><span class="eyebrow">最推荐放</span><strong>${pick?e(pick.name):'—'}</strong><span class="egg-reco-meta">${pick?`本轮 ${pick.progress}/${pick.target}${round?` · 已完成 ${round} 轮`:''}`:'先添加物品'}</span></div>
+   <div class="egg-reco-main"><span class="eyebrow">${state.eggPick?'备选放':'最推荐放'}</span><strong>${pick?e(pick.name):'—'}</strong><span class="egg-reco-meta">${pick?`本轮 ${pick.progress}/${pick.target} · 已完成 ${C.eggRound(egg)} 轮`:'先添加物品'}</span></div>
    <div class="egg-reco-actions">${pick?`<button class="egg-add-main" data-action="egg-add" data-id="${e(pick.id)}">放一个 +1</button>`:''}<button class="ghost small" data-action="egg-reroll">换一个</button></div>
   </div>
   <div class="egg-toolbar">
@@ -354,7 +365,7 @@ async function action(a,node){
  if(a==='install'){installHelp();return;}
  if(a==='detail'){state.itemID=id;render();window.scrollTo({top:0});return;}
  if(a==='detail-back'){state.itemID=null;render();return;}
- if(a==='egg-add'){const id=node.dataset.id;state.eggReroll=0;await mutateEgg(egg=>C.eggChange(egg,id,1));return;}
+ if(a==='egg-add'){const id=node.dataset.id;await mutateEgg(egg=>C.eggChange(egg,id,1));return;}
  if(a==='egg-minus'){const id=node.dataset.id;try{await mutateEgg(egg=>C.eggChange(egg,id,-1));}catch(err){toast(err.message);}return;}
  if(a==='egg-next-round'){state.eggRoundView=state.eggRoundView?0:1;render();return;}
  if(a==='egg-rename'){const item=eggBook().items.find(i=>i.id===id);if(!item)return;showSheet('修改名字',`<label class="field-label" for="name">物品名称</label><input class="field-input" id="name" name="name" maxlength="40" value="${e(item.name)}">`,async fd=>{await mutateEgg(egg=>C.eggRename(egg,id,String(fd.get('name')||'')));return true;});return;}
@@ -364,7 +375,7 @@ async function action(a,node){
  if(a==='egg-mode'){state.books={sales:state.books.sales,stock:state.books.stock,egg:!state.books.egg};saveBooks(state.books);render();return;}
  if(a==='book-toggle'){const k=node.dataset.book,next={...state.books,[k]:!state.books[k]};if(!next.sales&&!next.stock&&!next.egg){toast('至少要留一个功能。');return;}state.books=next;saveBooks(next);if(!enabledBooks().includes(state.book))state.book=enabledBooks()[0];if(!next.egg&&state.page==='egg'){state.page='count';state.eggItemID=null;history.replaceState(null,'','#count');}if(!next.sales&&!next.stock&&state.page==='count'){state.page='egg';history.replaceState(null,'','#egg');}render();return;}
  if(a==='tab-up'||a==='tab-down'){const p=node.dataset.page,i=TABS.indexOf(p),j=a==='tab-up'?i-1:i+1;if(i<0||j<0||j>=TABS.length){return;}[TABS[i],TABS[j]]=[TABS[j],TABS[i]];saveTabs(TABS);render();return;}
- if(a==='egg-reroll'){state.eggReroll=(state.eggReroll||0)+1;render();return;}
+ if(a==='egg-reroll'){if(!eggReroll(eggBook()))toast('本轮只剩这一项需要放。');render();return;}
  if(a==='egg-only'){state.eggOnlyLeft=!state.eggOnlyLeft;render();return;}
  if(a==='egg-arrange'){state.eggArrange=!state.eggArrange;render();return;}
  if(a==='egg-move'){const id=node.dataset.id,step=node.dataset.step,egg=eggBook(),order=eggOrder(egg),i=order.indexOf(id);const cols=Math.max(1,state.eggCols||1);const delta=step==='cols'?cols:step==='-cols'?-cols:Number(step);const j=i+delta;if(i<0||j<0||j>=order.length){toast('已经到头了。');return;}[order[i],order[j]]=[order[j],order[i]];await mutateEgg(egg=>{egg.order=order;});return;}

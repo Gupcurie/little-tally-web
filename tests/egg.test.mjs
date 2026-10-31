@@ -1,6 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import * as C from '../dist/core.js';
+import { readFileSync } from 'node:fs';
+import vm from 'node:vm';
 
 function seeded(seed) {
   let s = seed >>> 0;
@@ -95,12 +97,12 @@ test('progress reports what is still missing this round', () => {
   assert.equal(first.round, 0);
 });
 
-test('recommendation is null without items and honours an exclude', () => {
+test('recommendation is null without items and follows current counts', () => {
   assert.equal(C.eggRecommend(C.emptyEgg(), {}), null);
   const egg = freshEgg([['甲', 1], ['乙', 1]]);
   C.eggChange(egg, egg.items[0].id, 1);
   const pick = C.eggRecommend(egg, { random: () => 0.5 });
-  assert.ok(pick && ['甲', '乙'].includes(pick.name));
+  assert.equal(pick.name, '乙');
 });
 
 test('deleting records lowers the count but not the last-change time', () => {
@@ -133,4 +135,130 @@ test('recommendation set offers distinct alternatives', () => {
   const set = C.eggRecommendationSet(egg, 3, seeded(5));
   assert.ok(set.length >= 2);
   assert.equal(new Set(set.map((p) => p.id)).size, set.length);
+});
+
+test('a dominant ratio can repeat and still completes each round exactly', () => {
+  const egg = freshEgg([['多', 9], ['少', 1]]);
+  const picks = [];
+  for (let k = 0; k < 30; k++) {
+    const pick = C.eggRecommend(egg);
+    picks.push(pick.id);
+    C.eggChange(egg, pick.id, 1);
+    if ((k + 1) % 10 === 0) {
+      assert.deepEqual(Object.values(C.eggCounts(egg)), [9 * (k + 1) / 10, (k + 1) / 10]);
+    }
+  }
+  assert.ok(picks.some((id, k) => k > 0 && id === picks[k - 1]));
+});
+
+test('ahead-of-round counts never cause a full item to be recommended', () => {
+  const egg = freshEgg([['甲', 10], ['乙', 1], ['丙', 1]]);
+  C.eggSetCount(egg, egg.items[1].id, 100);
+  for (let k = 0; k < 22; k++) {
+    const pick = C.eggRecommend(egg);
+    const progress = C.eggProgress(egg).find(p => p.id === pick.id);
+    assert.ok(progress.left > 0);
+    assert.notEqual(pick.name, '乙');
+    C.eggChange(egg, pick.id, 1);
+  }
+  assert.deepEqual(Object.values(C.eggCounts(egg)), [20, 100, 2]);
+  assert.equal(C.eggRound(egg), 2);
+});
+
+test('manual changes, ratio edits and record deletion immediately change the recommendation', () => {
+  const egg = freshEgg([['甲', 1], ['乙', 1]]);
+  const [a, b] = egg.items;
+  assert.equal(C.eggRecommend(egg).id, a.id);
+  C.eggChange(egg, a.id, 1);
+  assert.equal(C.eggRecommend(egg).id, b.id);
+  C.eggChange(egg, a.id, -1);
+  assert.equal(C.eggRecommend(egg).id, a.id);
+  C.eggSetRatio(egg, b.id, 3);
+  assert.equal(C.eggRecommend(egg).id, b.id);
+  C.eggSetCount(egg, b.id, 3);
+  assert.equal(C.eggRecommend(egg).id, a.id);
+  C.eggDeleteRecords(egg, new Set([egg.records.at(-1).id]));
+  assert.equal(C.eggRecommend(egg).id, b.id);
+});
+
+test('alternatives are stable, include all eligible items and never change records', () => {
+  const egg = freshEgg([['甲', 100], ['乙', 1], ['丙', 1], ['丁', 1], ['戊', 1]]);
+  C.eggSetCount(egg, egg.items[1].id, 1);
+  const before = JSON.stringify(egg);
+  const picks = C.eggRecommendationSet(egg, 200);
+  assert.equal(picks.length, 4);
+  assert.equal(picks[0].id, C.eggRecommend(egg).id);
+  assert.ok(!picks.some(p => p.name === '乙'));
+  for (let k = 0; k < 20; k++) assert.deepEqual(C.eggRecommendationSet(egg, 200), picks);
+  assert.equal(JSON.stringify(egg), before);
+});
+
+test('sampled ratios and manual starting counts always fill each missing round exactly', () => {
+  const random = seeded(92);
+  for (let trial = 0; trial < 80; trial++) {
+    const ratios = Array.from({ length: 2 + Math.floor(random() * 6) }, (_, k) => [String(k), 1 + Math.floor(random() * 12)]);
+    const egg = freshEgg(ratios);
+    for (const item of egg.items) C.eggSetCount(egg, item.id, Math.floor(random() * 50));
+    const round = C.eggRound(egg), counts = C.eggCounts(egg);
+    const missing = C.eggProgress(egg).reduce((n, p) => n + p.left, 0);
+    for (let k = 0; k < missing; k++) {
+      const pick = C.eggRecommend(egg);
+      assert.ok(C.eggProgress(egg).find(p => p.id === pick.id).left > 0);
+      C.eggChange(egg, pick.id, 1);
+    }
+    const after = C.eggCounts(egg);
+    for (const item of egg.items) assert.equal(after[item.id], Math.max(counts[item.id], (round + 1) * item.ratio));
+  }
+});
+
+// Exercise the actual page selection functions without signing in or touching live accounts.
+function pagePicker(egg) {
+  const source = readFileSync(new URL('../dist/app.js', import.meta.url), 'utf8');
+  const context = vm.createContext({ C, state: { eggPick: null } });
+  vm.runInContext(source.slice(source.indexOf('function eggPickKey('), source.indexOf('function eggView(')), context);
+  return { pick: () => context.eggPickId(egg), change: () => context.eggReroll(egg) };
+}
+
+test('page change button cycles alternatives and stays stable across redraws', () => {
+  const egg = freshEgg([['甲', 100], ['乙', 1], ['丙', 1], ['丁', 1], ['戊', 1]]);
+  const page = pagePicker(egg), before = JSON.stringify(egg), seen = new Set([page.pick()]);
+  for (let k = 1; k < 5; k++) {
+    const previous = page.pick();
+    assert.equal(page.change(), true);
+    const next = page.pick();
+    assert.notEqual(next, previous);
+    seen.add(next);
+    for (let j = 0; j < 10; j++) assert.equal(page.pick(), next);
+  }
+  assert.equal(seen.size, 5);
+  page.change();
+  assert.equal(page.pick(), C.eggRecommend(egg).id);
+  assert.equal(JSON.stringify(egg), before);
+});
+
+test('page discards an alternative when quantities or ratios change, including cloud refresh', () => {
+  const egg = freshEgg([['甲', 1], ['乙', 1], ['丙', 1]]);
+  const page = pagePicker(egg);
+  page.change();
+  const previous = page.pick();
+  C.eggChange(egg, previous, 1);
+  assert.equal(page.pick(), C.eggRecommend(egg).id);
+  assert.notEqual(page.pick(), previous);
+  page.change();
+  C.eggSetRatio(egg, egg.items[2].id, 10);
+  assert.equal(page.pick(), C.eggRecommend(egg).id);
+  page.change();
+  egg.records = [];
+  assert.equal(page.pick(), C.eggRecommend(egg).id);
+});
+
+test('page handles a single remaining candidate and an empty book', () => {
+  const egg = freshEgg([['甲', 1], ['乙', 1]]);
+  C.eggChange(egg, egg.items[0].id, 1);
+  const page = pagePicker(egg);
+  assert.equal(page.change(), false);
+  assert.equal(page.pick(), egg.items[1].id);
+  egg.items = []; egg.records = [];
+  assert.equal(page.pick(), null);
+  assert.equal(page.change(), false);
 });

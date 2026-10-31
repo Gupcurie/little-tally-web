@@ -199,33 +199,21 @@ export function eggDeleteItem(egg,id){
  egg.records=egg.records.filter(r=>r.itemId!==id);
  if(egg.goal&&Object.keys(egg.goal.values||{}).includes(id))egg.goal=null;
 }
-// 推荐下一个放什么：理想进度差额最大者优先；占比越小，间隔时间越长。
-// jitter 用于“换一个”，exclude 用来避免连续重复。
-export function eggRecommend(egg,{jitter=0,random=Math.random,excludeLast=true}={}){
+// 按本轮实际进度实时排队；超前数量保留到后续轮次，不挤占本轮缺项。
+// 同样的数量和比例始终得到同样的顺序；高占比需要时允许连放。
+export function eggRecommendationSet(egg,count=4){
  const items=egg.items.filter(i=>Number(i.ratio)>0);
- if(!items.length)return null;
- const c=eggCounts(egg),totalRatio=sum(items.map(i=>i.ratio)),placed=sum(items.map(i=>c[i.id]));
- const last=eggLastPlaced(egg);
- const scored=items.map(i=>{
-  const ideal=(placed+1)*i.ratio/totalRatio;
-  const deficit=ideal-c[i.id];
-  return {id:i.id,name:i.name,ratio:i.ratio,deficit,score:deficit+(random()-0.5)*jitter};
- });
- scored.sort((a,b)=>b.score-a.score);
- const pick=scored[0];
- return {id:pick.id,name:pick.name,ratio:pick.ratio,deficit:pick.deficit,
-  reason:pick.deficit>0.5?'落后进度较多':'按比例轮转',round:eggRound(egg)};
+ if(!items.length)return [];
+ const c=eggCounts(egg),round=Math.min(...items.map(i=>Math.floor(c[i.id]/i.ratio)));
+ const progress=items.map(i=>({...i,progress:Math.min(i.ratio,c[i.id]-round*i.ratio)}));
+ const totalRatio=sum(items.map(i=>i.ratio)),placed=sum(progress.map(i=>i.progress));
+ return progress.filter(i=>i.progress<i.ratio).map(i=>{
+  const score=(placed+1)*i.ratio-i.progress*totalRatio,deficit=score/totalRatio;
+  return {id:i.id,name:i.name,ratio:i.ratio,deficit,score,round,
+   reason:deficit>0.5?'落后进度较多':'按比例轮转'};
+ }).sort((a,b)=>b.score-a.score).slice(0,Math.max(0,count));
 }
-export function eggRecommendationSet(egg,count=4,random=Math.random){
- const out=[],seen=new Set(),copy={book:'egg',items:egg.items,records:egg.records.slice(),goal:egg.goal};
- for(let k=0;k<count;k++){
-  const pick=eggRecommend(copy,{jitter:0.9,random});
-  if(!pick||seen.has(pick.id))break;
-  seen.add(pick.id);out.push(pick);
-  copy.records.push({id:'probe-'+k,itemId:pick.id,delta:1,at:Date.now(),kind:'count'});
- }
- return out;
-}
+export function eggRecommend(egg){return eggRecommendationSet(egg,1)[0]||null;}
 export class LocalLedger {
  constructor(storage,key='little-tally-pocket-v1') {this.storage=storage;this.key=key;this.state=initialState();this.raw=null;this.readOnly=false;this.error=null;this.reload();}
  reload(){try{const raw=this.storage.getItem(this.key);if(raw!==null){this.state=validateState(JSON.parse(raw));this.raw=raw;}else{this.raw=null;}this.readOnly=false;this.error=null;}catch(e){this.readOnly=true;this.error='本地记录未能读取，原文件没有被覆盖。请先导出原文件，再从备份恢复。';}return !this.readOnly;}
