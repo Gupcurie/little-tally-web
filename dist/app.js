@@ -48,7 +48,7 @@ function render(){
   try{main.innerHTML=({count:countView,egg:eggView,history:historyView,stats:statsViewNew,ratio:ratioView,settings:settingsView}[state.page]||countView)();}
   catch(err){state.eggItemID=null;state.page='count';main.innerHTML=countView();toast('这个页面刚刚没打开，已回到记数页。');}
  }
- fitItemGrid();fitEggGrid();
+ fitItemGrid();fitEggGrid();layoutVars();
 }
 function fitItemGrid(){
  const grid=main.querySelector('.count-dashboard .item-grid');if(!grid)return;
@@ -63,7 +63,11 @@ function fitItemGrid(){
  grid.style.setProperty('--item-columns',best.columns);grid.style.setProperty('--item-rows',best.rows);
  grid.classList.toggle('item-grid-scroll',(height-gap*(best.rows-1))/best.rows<minHeight);
 }
-new ResizeObserver(()=>fitItemGrid()).observe(main);
+function layoutVars(){
+ const height=Math.round(nav.getBoundingClientRect().height);
+ document.documentElement.style.setProperty('--nav-h',(height>0?height:64)+'px');
+}
+new ResizeObserver(()=>{fitItemGrid();fitEggGrid();}).observe(main);
 function loginView(){const registering=state.authMode==='register';return `<section class="hero login-hero"><p class="section-eyebrow">KEEP EVERY LITTLE MOMENT</p><h1>每一笔，都好好收着。</h1><p class="login-description">记数、点库存，也记住小小的收获。<br>登录你的账户，接着上一次继续。</p><svg class="login-art" viewBox="0 0 108 108" aria-hidden="true"><path d="M37 28v52m17-52v52m17-52v52M23 71l63-29" fill="none" stroke="#386b4f" stroke-width="5" stroke-linecap="round"/></svg></section><section class="panel login-panel"><h2>${ledger.loading?'正在打开你的账本…':registering?'创建你的账户':'欢迎回来'}</h2><p class="inline-caption">${registering?'只需用户名和密码，不需要邮箱。':'用用户名和密码，打开自己的账本。'}</p>${ledger.error?`<div class="soft-message error">${e(ledger.error)}</div>`:''}${!ledger.loading?`<form id="account-form"><label class="field-label" for="account-username">用户名</label><input class="field-input" id="account-username" name="username" type="text" autocapitalize="none" spellcheck="false" autocomplete="username" placeholder="3–24 位字母、数字或下划线" minlength="3" maxlength="24" pattern="[A-Za-z0-9_]{3,24}" required ${ledger.configured?'':'disabled'}><label class="field-label" style="margin-top:18px" for="account-password">密码</label><input class="field-input" id="account-password" name="password" type="password" autocomplete="${registering?'new-password':'current-password'}" placeholder="${registering?'至少 6 位，可用纯数字或纯字母':'请输入密码'}" ${registering?'minlength="6"':''} maxlength="128" required ${ledger.configured?'':'disabled'}>${registering?'<label class="field-label" style="margin-top:18px" for="account-confirm">确认密码</label><input class="field-input" id="account-confirm" name="confirm" type="password" autocomplete="new-password" placeholder="再输入一次密码" minlength="6" maxlength="128" required>':''}<button class="primary-button" type="submit" style="margin-top:22px" ${ledger.configured?'':'disabled'}>${icon('shield')}${registering?'注册并进入':'登录'}</button><p class="hint">用户名不区分大小写。${registering?'请保存好用户名和密码；此版本不通过邮箱找回密码。':'不同账户的记录单独保存。'}</p><div id="account-message" class="sheet-error" role="status"></div></form><button class="small-button" style="width:100%;margin-top:14px" data-action="auth-mode">${registering?'已有账户？去登录':'还没有账户？注册一个'}</button>${!ledger.configured?'<div class="soft-message warn">账户服务正在准备中，暂时不能注册或同步云端记录。</div>':''}`:''}</section><section class="panel" style="margin-top:18px"><button class="small-button" style="width:100%" data-action="check-connection">检查连接</button><div id="connection-message" class="hint" role="status" style="white-space:pre-line">遇到打不开、注册或登录失败时，可检查当前网络。</div></section><div class="login-features"><span>${icon('check')}独立账户</span><span>${icon('check')}云端保存</span><span>${icon('check')}随时导出</span></div><p class="hint" style="text-align:center">已有本机数据？登录后可从设置导入备份。</p><button class="small-button" style="width:100%;margin-top:14px" data-action="local-mode">先体验本机记数（不含云端同步）</button>`;}
 
 function pageHeading(eyebrow,name,subtitle){return `<p class="section-eyebrow">${eyebrow}</p><h1 class="page-title">${name}</h1><p class="page-subtitle">${subtitle}</p>`;}
@@ -394,6 +398,10 @@ async function action(a,node){
  if(a==='persist'){const yes=await ledger.requestProtection();toast(yes?'浏览器已允许持久保留；清除网站数据仍会删除记录，请保留备份。':'浏览器暂未授予持久存储权限。自动保存仍有效，请定期导出备份。');render();return;}
  if(a==='copy-report'){try{await navigator.clipboard.writeText(report());toast('今日记数与库存已复制。');}catch{showSheet('今日记数与库存',`<textarea class="field-input" style="height:260px;padding:15px;font-size:12px;line-height:1.7" readonly aria-label="记数与库存汇总">${e(report())}</textarea><p class="hint">可长按内容，全选并复制。</p><button class="primary-button" type="button" data-action="close-sheet">完成</button>`);}return;}
 }
+let resizeFrame=0;
+const relayout=()=>{if(resizeFrame)return;resizeFrame=requestAnimationFrame(()=>{resizeFrame=0;layoutVars();fitItemGrid();fitEggGrid();});};
+window.addEventListener('resize',relayout);
+window.addEventListener('orientationchange',relayout);
 document.addEventListener('contextmenu',event=>{if(event.target.closest('.bottom-nav')||event.target.closest('.egg-card'))event.preventDefault();});
 let suppressClick=false,pressTimer=null,pressTarget=null;
 document.addEventListener('pointerdown',event=>{

@@ -125,3 +125,29 @@ body.egg-screen main{height:calc(100dvh - 76px);overflow:hidden;padding:8px 10px
 .order-buttons button{min-width:38px;height:32px;padding:0}
 .bottom-nav button{touch-action:none}
 .stacked-chart .hour-col.on{background:#eef3ec;border-radius:6px}
+/* ---------------- 自适应：窄屏与缩放 ---------------- */
+:root{--nav-h:64px}
+.app-header{flex-wrap:nowrap;min-width:0;gap:8px}
+.brand{min-width:0;flex:1 1 auto}
+.brand span{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.bottom-nav{flex-wrap:nowrap;gap:0}
+.bottom-nav button{min-width:0;overflow:hidden;padding-left:2px;padding-right:2px}
+.bottom-nav button span{display:block;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.bottom-nav button .icon{flex:none}
+.heading-row{flex-wrap:wrap;gap:8px;min-width:0}
+.book-switch{flex-wrap:wrap}
+.metric-grid,.hero,.row,.panel{min-width:0}
+.egg-reco{flex-wrap:wrap;row-gap:8px}
+.egg-reco-main{flex:1 1 150px;min-width:0}
+.egg-reco strong{font-size:clamp(17px,5.2vw,22px);line-height:1.2}
+.egg-reco-meta{white-space:normal}
+.egg-reco-actions{flex:0 0 auto;flex-wrap:wrap;gap:6px}
+.egg-toolbar{flex-wrap:wrap;row-gap:6px}
+.egg-chip{max-width:100%;overflow:hidden;text-overflow:ellipsis}
+.egg-card{min-width:0;overflow:hidden}
+.egg-name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.egg-foot{flex-wrap:wrap;row-gap:4px}
+.egg-pair{flex:0 0 auto}
+body.egg-screen main{height:calc(100dvh - var(--nav-h,64px) - 8px)}
+@media(max-width:400px){.bottom-nav button span{font-size:9px}}
+@media(max-width:336px){.bottom-nav button span{display:none}.bottom-nav button{min-height:40px}}
