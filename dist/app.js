@@ -97,6 +97,20 @@ function historyView(){
 function historyRows(rows){return rows.length?rows.slice(0,state.historyLimit).map(r=>recordLine(r,true)).join('')+(rows.length>state.historyLimit?`<button class="small-button" style="width:100%" data-action="more-history">加载更多（已显示 ${state.historyLimit} 条）</button>`:''):empty();}
 function bookPicker(){const keys=enabledBooks();if(keys.length<2)return '';return `<div class="book-switch">${keys.map(k=>`<button data-action="book" data-book="${k}" class="${state.book===k?'active':''}">${k==='egg'?'放蛋':title(k)}</button>`).join('')}</div>`;}
 function rangePills(){return `<div class="pill-row">${['今天','近7天','近30天','全部'].map((v,i)=>`<button class="${state.range===i?'active':''}" data-action="range" data-range="${i}">${v}</button>`).join('')}</div>`;}
+function eggSummaryPanel(){
+ if(!state.books.egg)return '';
+ const egg=eggBook();
+ if(!egg.items.length)return '';
+ const total=C.eggTotal(egg),round=C.eggRound(egg);
+ const key=C.day(Date.now());
+ const today=egg.records.filter(r=>C.day(r.at)===key).reduce((sum,r)=>sum+r.delta,0);
+ const top=C.eggProgress(egg).slice().sort((a,b)=>b.count-a.count).slice(0,4);
+ const peak=Math.max(1,...top.map(p=>p.count));
+ return `<section class="panel"><div class="heading-row"><h2 style="margin:0">放蛋</h2><button class="small-button" data-action="book" data-book="egg">查看放蛋统计</button></div>
+ <div class="metric-grid"><div><small>总件数</small><strong>${fmt(total)}</strong></div><div><small>今日</small><strong>${fmt(today)}</strong></div><div><small>已完成轮数</small><strong>${round}</strong></div></div>
+ ${top.map(p=>`<div class="rank-row"><div class="rank-title"><span>${e(p.name)}</span><small>${fmt(p.count)} 个 · 本轮 ${p.progress}/${p.ratio}</small></div><div class="rank-track"><div class="rank-fill" style="width:${Math.round(p.count/peak*100)}%"></div></div></div>`).join('')}
+ </section>`;
+}
 function statsViewNew(){
  if(state.book==='egg')return eggStatsView();
  const b=book(),items=b.items,rows=filteredRecords();
@@ -110,6 +124,7 @@ function statsViewNew(){
  const activeName=filter?(items.find(i=>i.id===filter)?.name||''):'';
  return `${pageHeading('A LITTLE MORE INSIGHT','小小记录，大有发现',`${title(state.book)} · 包含加减与手动改数`)}${bookPicker()}${rangePills()}
  <div class="metric-grid"><div><small>期间净增加</small><strong>${fmt(C.sum(rows.map(r=>r.delta)))}</strong></div><div><small>记录次数</small><strong>${fmt(rows.length)}</strong></div><div><small>活跃物品</small><strong>${new Set(rows.map(r=>r.itemId)).size}</strong></div></div>
+ ${eggSummaryPanel()}
  <section class="panel"><div class="heading-row"><h2 style="margin:0">时段分布</h2><div class="book-switch"><button data-action="stats-gran" data-gran="hour" class="${gran==='hour'?'active':''}">24 小时</button><button data-action="stats-gran" data-gran="minute" class="${gran==='minute'?'active':''}">按分钟</button></div></div>
  ${rows.length?`${chartBlock(rows,items,{gran,hour:gran==='minute'?hour:null,filter})}${gran==='minute'?`<p class="hour-result">${String(hour).padStart(2,'0')}:00–${String(hour+1).padStart(2,'0')}:00 · 每分钟${filter?'（只看 '+e(activeName)+'）':''}</p>`:`<p class="hour-result">颜色代表物品，点一根柱子看那一小时的每分钟</p>`}${legendRow(items,filter)}`:empty('还没有变化','开始记数后，这里就有你的节奏。')}</section>
  <section class="panel"><h2>${filter?'今天 · '+e(activeName):'明细'}</h2>${list.length?list.map(r=>recordLine(r)).join(''):empty('这里还没有记录')}</section>
