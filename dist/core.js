@@ -212,8 +212,7 @@ export function eggRecommend(egg,{jitter=0,random=Math.random,excludeLast=true}=
   return {id:i.id,name:i.name,ratio:i.ratio,deficit,score:deficit+(random()-0.5)*jitter};
  });
  scored.sort((a,b)=>b.score-a.score);
- let pick=scored[0];
- if(excludeLast&&last&&pick.id===last&&scored.length>1&&pick.deficit<1){pick=scored[1];}
+ const pick=scored[0];
  return {id:pick.id,name:pick.name,ratio:pick.ratio,deficit:pick.deficit,
   reason:pick.deficit>0.5?'落后进度较多':'按比例轮转',round:eggRound(egg)};
 }
