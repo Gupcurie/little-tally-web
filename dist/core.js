@@ -116,6 +116,9 @@ export function validateEgg(egg){
   requireThat(i&&validID(i.id)&&!ids.has(i.id)&&typeof i.name==='string'&&i.name.trim().length>0&&i.name.length<=40&&!labels.has(i.name)&&validTime(i.created)&&Number.isSafeInteger(i.color),'放蛋物品数据无效，或名称／编号重复。');
   ids.add(i.id);labels.add(i.name);
   requireThat(Number.isSafeInteger(i.ratio)&&i.ratio>=1&&i.ratio<=1000000,'每个物品的比例须为 1 至 1000000 的整数。');
+  if(i.photo!==undefined&&i.photo!==null){
+   requireThat(typeof i.photo==='string'&&i.photo.startsWith('data:image/')&&i.photo.length<=400000,'图片数据无效或过大。');
+  }
  }
  for(const r of egg.records){requireThat(r&&validID(r.id)&&!recordIDs.has(r.id)&&ids.has(r.itemId)&&Number.isSafeInteger(r.delta)&&Math.abs(r.delta)<=MAX&&validTime(r.at)&&['count','set'].includes(r.kind),'放蛋记录无效。');recordIDs.add(r.id);}
  const values=eggCounts(egg);
@@ -172,6 +175,22 @@ export function eggDeleteRecords(egg,ids){
  const values=eggCounts(next);
  for(const i of next.items)requireThat(values[i.id]>=0,'会删成负数，已取消这次删除。');
  egg.records=next.records;
+}
+export function eggTotal(egg){const c=eggCounts(egg);return sum(egg.items.map(i=>c[i.id]));}
+export function eggRename(egg,id,name){
+ name=String(name??'').trim();
+ const item=egg.items.find(i=>i.id===id);
+ requireThat(item,'找不到这个物品。');
+ requireThat(name.length>0&&name.length<=40,'名字需要 1 至 40 个字。');
+ requireThat(!egg.items.some(i=>i.id!==id&&i.name===name),'已经有同名物品了。');
+ item.name=name;
+}
+export function eggSetPhoto(egg,id,photo){
+ const item=egg.items.find(i=>i.id===id);
+ requireThat(item,'找不到这个物品。');
+ if(photo===null){delete item.photo;return;}
+ requireThat(typeof photo==='string'&&photo.startsWith('data:image/')&&photo.length<=400000,'图片数据无效或过大。');
+ item.photo=photo;
 }
 export function eggDeleteItem(egg,id){
  egg.items=egg.items.filter(i=>i.id!==id);
