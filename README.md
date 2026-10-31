@@ -70,3 +70,13 @@ https://supabase.com/docs/guides/auth/auth-smtp
 网站：https://gupcurie.github.io/little-tally-web/
 
 GitHub Pages 已发布；数据库迁移及账户隔离验证完成。当前使用 Gupcurie 账户下 Little Tally 免费组织的新项目 `pinztkcvnaswsiorhaun`，数据库及 URL 白名单已配置。SMTP 已由项目所有者在后台保存并启用，网站 `cloudConfig.authEnabled` 已设为 `true`。数据库保存和账户隔离已验证；真实邮箱投递、手机登录、再次登录恢复还需要使用者实际完成验证。密码或 SMTP 授权码仅在服务商后台填写。
+
+## 用户名密码版（2026-10-31）
+
+新版只要求 3–24 位英文字母、数字、下划线用户名和至少 10 位含字母数字的密码。用户名统一小写；密码由 Supabase Auth 存储其散列，不写入前端缓存。用户名 SHA-256 对应 `.invalid` 内部标识，不代表真实邮箱，不发送确认邮件。注册通过 `tally-accounts` Edge Function 完成，服务密钥只读运行环境；其他读写继续按 `auth.uid()` 隔离。注册端点保留网关 JWT 校验，使用只具有 anon 权限的公开 JWT 作为网关标识；它不代表账户登录。函数内部实施输入校验、源站白名单及数据库持久限流；数据库限流 RPC 仅 service_role 可执行。
+
+需要在函数环境设置 `TALLY_ALLOWED_ORIGINS` 为实际网站 origin。现有邮箱确认和其他账户的认证设置不需要关闭。此版未提供密码找回，使用者需自行保存凭据及定期导出记录。
+
+密码页面部署在独立 HTTPS 站点。GitHub Pages 保留为新版入口和旧本机数据导出入口。
+
+实际用户名密码版：https://little-tally-pocket-455b.sharp-wave-4678.chatgpt.site

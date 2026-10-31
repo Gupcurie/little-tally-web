@@ -1,3 +1,4 @@
+import {canonicalUsername,checkPassword,accountAddress} from './account.js';
 import {initialState,validateState,clone,uid} from './core.js';
 import {BrowserLedger} from './storage.js';
 
@@ -18,7 +19,7 @@ export class CloudLedger {
    if(event==='INITIAL_SESSION')return;
    if(session?.user?.id===this.user?.id&&event!=='SIGNED_OUT')return;
    // Supabase warns against awaiting auth APIs inside the auth callback.
-   setTimeout(()=>{this._accountTask=this._accountTask.then(()=>this.setSession(session)).catch(()=>{});},0);
+   setTimeout(()=>{this._accountTask=this._accountTask.then(()=>session?.user?.id===this.user?.id&&this.signedIn?undefined:this.setSession(session)).catch(()=>{});},0);
   }).data.subscription;
   if(typeof BroadcastChannel!=='undefined'){this.channel=new BroadcastChannel('little-tally-cloud-updates-v1');this.channel.onmessage=event=>{const x=event.data;if(x?.user===this.user?.id&&x.revision>this.cloudRevision&&!this.saving)this.reload().catch(()=>{});};}
   return this;
@@ -32,7 +33,7 @@ export class CloudLedger {
   try{
    const {data,error}=await this.client.auth.getUser();if(error||!data.user||data.user.id!==session.user.id)throw new Error('登录已失效，请重新登录。');
    if(epoch!==this.epoch)return;
-   this.user={id:data.user.id,email:data.user.email};this.signedIn=true;
+   this.user={id:data.user.id,username:data.user.app_metadata?.tally_username||'',email:data.user.email};this.signedIn=true;
    this.cache=this.cacheFactory('account-'+data.user.id);await this.cache.init();
    if(epoch!==this.epoch)return;
    await this.reload();
@@ -103,12 +104,27 @@ export class CloudLedger {
  async previous(){const rows=await this.request('rpc/tally_backup_list',{method:'POST',body:{}});if(!rows?.length)return null;const row=rows[0],snapshot=await this.request('rpc/tally_backup_get',{method:'POST',body:{p_revision:row.revision}});return snapshot?{state:validateState(snapshot),savedAt:Date.parse(row.saved_at)}:null;}
  async requestProtection(){if(!this.cache)return false;this.protection=await this.cache.requestProtection();return this.protection;}
  raw(){return JSON.stringify(this.state,null,2);}
- async login(email){
+ async login(username,password){
   if(!this.client)throw new Error('账户服务尚未开通。');
-  if(!globalThis.isSecureContext)throw new Error('请通过正式 HTTPS 网站登录，当前预览连接仅用于界面检查。');
-  const redirect=this.config.redirectUrl||new URL('./',location.href).href;
-  const {error}=await this.client.auth.signInWithOtp({email:email.trim(),options:{emailRedirectTo:redirect,shouldCreateUser:true}});
-  if(error){const m=String(error.message||'');throw new Error(m.includes('rate')?'登录邮件发送过于频繁，请稍后再试。':m.includes('authorized')?'登录邮件服务尚未配置完成，请联系网站创建者。':'登录邮件未能发送，请检查邮箱地址后重试。');}
+  if(!globalThis.isSecureContext)throw new Error('请通过正式 HTTPS 网站登录。');
+  username=canonicalUsername(username);
+  if(typeof password!=='string'||!password)throw new Error('请输入密码。');
+  const {data,error}=await this.client.auth.signInWithPassword({email:await accountAddress(username),password});
+  if(error||!data?.session){throw new Error(error?.status===429?'登录尝试过于频繁，请稍后再试。':'用户名或密码不正确。');}
+  await this.setSession(data.session);
+ }
+ async register(username,password){
+  if(!this.client)throw new Error('账户服务尚未开通。');
+  if(!globalThis.isSecureContext)throw new Error('请通过正式 HTTPS 网站注册。');
+  username=canonicalUsername(username);checkPassword(password);
+  const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),20000);
+  try{
+   const response=await this.fetcher(this.config.url+'/functions/v1/tally-accounts',{method:'POST',headers:{apikey:this.config.publishableKey,Authorization:'Bearer '+this.config.registrationKey,'Content-Type':'application/json'},body:JSON.stringify({username,password}),signal:controller.signal});
+   const data=await response.json().catch(()=>({}));
+   if(!response.ok){throw new Error(data.error==='USERNAME_TAKEN'?'这个用户名已被使用，请换一个。':response.status===429?'注册尝试过于频繁，请稍后再试。':'注册暂时未完成，请稍后重试。');}
+   if(!data.created)throw new Error('注册结果未能确认，请先尝试登录。');
+   try{await this.login(username,password);}catch{throw new Error('账户已创建。请切换到“登录”，使用刚才的用户名和密码。');}
+  }finally{clearTimeout(timer);}
  }
  async logout(){if(this.saving)throw new Error('请等当前这笔保存完成后再退出。');const {error}=await this.client.auth.signOut({scope:'local'});if(error)throw new Error('退出未完成，请检查网络后重试。');await this.setSession(null);}
 }
