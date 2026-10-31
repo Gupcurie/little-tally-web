@@ -138,3 +138,12 @@ end;
 $$;
 revoke all on function public.tally_backup_get(bigint) from public,anon,authenticated;
 grant execute on function public.tally_backup_get(bigint) to authenticated;
+
+-- Supabase automatic-RLS event triggers do not need client execution access.
+do $$
+begin
+ if to_regprocedure('public.rls_auto_enable()') is not null then
+  execute 'revoke execute on function public.rls_auto_enable() from public, anon, authenticated';
+ end if;
+end;
+$$;
