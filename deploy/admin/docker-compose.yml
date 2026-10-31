@@ -1,0 +1,30 @@
+services:
+  admin:
+    build: .
+    image: tally-admin:local
+    container_name: tally-admin
+    restart: unless-stopped
+    env_file:
+      - admin.env
+    read_only: true
+    tmpfs:
+      - /tmp
+    volumes:
+      - ./data:/data
+    networks:
+      - tally
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    mem_limit: 128m
+    logging:
+      driver: json-file
+      options:
+        max-size: "5m"
+        max-file: "2"
+
+networks:
+  tally:
+    external: true
+    name: little-tally_default

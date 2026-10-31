@@ -54,3 +54,31 @@ Rules for future changes:
 Verification that was actually performed: `smoke-test-https.py` runs the registration, login, save, retry, revision-conflict, isolation, logout and re-login checks through the real HTTPS entry with certificate verification, and keeps the administrator calls on `127.0.0.1:8000`. A separate isolated probe recreated a container behind both the old literal `proxy_pass` and the new resolved upstream: the old form returned `502` for the rest of the run, the new form recovered within ten seconds and stayed healthy.
 
 Still not verified: how the certificate renewal behaves at a real expiry, and browser/device behaviour across models. Do not claim those are covered.
+
+## Account console
+
+`deploy/admin/` is a small container that serves the administrator console at
+`https://43.142.19.116/admin/`. It lists accounts with registration time, last
+sign-in, ban state and ledger usage, and can disable/re-enable an account, issue
+a one-time new password and show an audit trail.
+
+It holds the `service_role` key server-side only; the browser receives neither
+that key nor any other secret. Administrator password = PBKDF2-HMAC-SHA256 hash
+in `admin.env` (0600), login limited to 8 failures per 15 minutes per IP,
+signed `HttpOnly; Secure; SameSite=Strict` session cookie, `X-CSRF` required for
+every mutating call, and a strict CSP plus `noindex`/`no-store` on `/admin/`.
+
+Operational notes:
+
+- `private-web.conf` carries the `tally_admin_gw` upstream and the `/admin/`
+  location. Regenerating the config from a template that lacks them silently
+  removes the console (and the site keeps working, so the loss is easy to miss).
+- The first password is written to `/opt/little-tally/admin/admin-password.txt`
+  (0600); delete it after memorising. Rotate with
+  `cd /opt/little-tally/admin && ./set-password.sh`.
+- `admin.env` must never be committed; only hashes and generated secrets live
+  there.
+- The console reaches Supabase over the internal network, so it survives an
+  `api-gw` recreation exactly like the public entry does.
+- Deleting accounts is deliberately not implemented: disabling keeps user data
+  recoverable.
