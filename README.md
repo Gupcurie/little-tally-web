@@ -64,3 +64,9 @@ GitHub Pages 官方不建议处理密码等敏感交易，所以本实现选择�
 
 https://docs.github.com/en/pages/getting-started-with-github-pages/securing-your-github-pages-site-with-https
 https://supabase.com/docs/guides/auth/auth-smtp
+
+## 当前上线状态
+
+网站：https://gupcurie.github.io/little-tally-web/
+
+GitHub Pages 已发布；数据库迁移及账户隔离验证完成。邮箱登录仍等待项目所有者在后台配置 URL 白名单和自定义 SMTP，因此 `cloudConfig.authEnabled` 暂设为 `false`。完成以上配置后，设为 `true` 并提交，部署后用两名真实使用者邮箱验证登录及再次登录数据恢复，再开放多人使用。密码或 SMTP 授权码仅在服务商后台填写。

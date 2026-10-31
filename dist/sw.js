@@ -1,4 +1,4 @@
-const VERSION='little-tally-shell-v2';
+const VERSION='little-tally-shell-v3';
 const ROOT=new URL('./',self.location).href;
 const ASSETS=['./','./index.html','./style.css','./app.js','./core.js','./storage.js','./cloud.js','./cloud-config.js','./vendor/supabase.js','./manifest.webmanifest','./icon.svg','./icon-192.png','./icon-512.png'];
 self.addEventListener('install',event=>{event.waitUntil((async()=>{const cache=await caches.open(VERSION);await cache.addAll(ASSETS);})());});
