@@ -119,7 +119,7 @@ function eggSummaryPanel(){
  const peak=Math.max(1,...top.map(p=>p.count));
  return `<section class="panel"><div class="heading-row"><h2 style="margin:0">放蛋</h2><button class="small-button" data-action="book" data-book="egg">查看放蛋统计</button></div>
  <div class="metric-grid"><div><small>总件数</small><strong>${fmt(total)}</strong></div><div><small>今日</small><strong>${fmt(today)}</strong></div><div><small>已完成轮数</small><strong>${round}</strong></div></div>
- ${top.map(p=>`<div class="rank-row"><div class="rank-title"><span>${e(p.name)}</span><small>${fmt(p.count)} 个 · 本轮 ${p.progress}/${p.ratio}</small></div><div class="rank-track"><div class="rank-fill" style="width:${Math.round(p.count/peak*100)}%"></div></div></div>`).join('')}
+ ${top.map(p=>`<div class="rank-row"><div class="rank-title"><span>${e(p.name)}</span><small>${fmt(p.count)} 个 · 第 ${p.itemRound} 轮 ${p.itemProgress}/${p.ratio}</small></div><div class="rank-track"><div class="rank-fill" style="width:${Math.round(p.count/peak*100)}%"></div></div></div>`).join('')}
  </section>`;
 }
 function statsViewNew(){
@@ -160,7 +160,7 @@ function eggStatsView(){
  ${eggActivityChart(buckets,gran)}
  <div class="egg-chart-key"><span><i class="egg-key-add"></i>放入</span><span><i class="egg-key-remove"></i>减回</span></div>
  <p class="hint">${gran==='day'&&state.range===3?'日趋势显示近 30 天；上方指标与下方明细包含全部记录。':gran==='hour'?'点小时柱可查看该小时的 60 分钟。':gran==='minute'?`显示 ${String(data.hour).padStart(2,'0')} 点的 60 分钟。`:''} 手动改数单独计入“手改净量”和明细。</p>${legendRow(egg.items,filter)}</section>
- <section class="panel"><h2>物品数量与本轮进度</h2>${data.items.map(i=>`<div class="egg-stat-item"><div class="rank-title"><button class="egg-stat-name" data-action="stats-filter" data-id="${e(i.id)}">${e(i.name)}</button><strong>累计 ${fmt(i.count)} 个</strong></div><div class="egg-stat-detail">本轮 ${i.progress}/${i.ratio} · 放入 ${fmt(i.added)} · 减回 ${fmt(i.removed)} · 手改 ${signed(i.manualNet)}</div><div class="rank-track"><div class="rank-fill" style="width:${Math.min(100,i.progress/i.ratio*100)}%"></div></div><div class="egg-stat-detail">${i.lastPlacedAt?'最近放入 '+e(C.clock(i.lastPlacedAt,true)):'暂无放入记录'}</div></div>`).join('')||'<p class="hint">还没有物品。</p>'}</section>
+ <section class="panel"><h2>物品数量与本轮进度</h2>${data.items.map(i=>`<div class="egg-stat-item"><div class="rank-title"><button class="egg-stat-name" data-action="stats-filter" data-id="${e(i.id)}">${e(i.name)}</button><strong>累计 ${fmt(i.count)} 个</strong></div><div class="egg-stat-detail">第 ${i.itemRound} 轮 ${i.progress}/${i.ratio} · 放入 ${fmt(i.added)} · 减回 ${fmt(i.removed)} · 手改 ${signed(i.manualNet)}</div><div class="rank-track"><div class="rank-fill" style="width:${Math.min(100,i.progress/i.ratio*100)}%"></div></div><div class="egg-stat-detail">${i.lastPlacedAt?'最近放入 '+e(C.clock(i.lastPlacedAt,true)):'暂无放入记录'}</div></div>`).join('')||'<p class="hint">还没有物品。</p>'}</section>
  <section class="panel"><div class="heading-row"><h2 style="margin:0">操作明细</h2><span class="inline-caption">${fmt(summary.records)} 条</span></div><p class="hint">净变化 = 放入 − 减回 + 手改净量；时间为北京时间。</p>${data.rows.slice(0,limit).map(r=>{const item=egg.items.find(i=>i.id===r.itemId);return `<div class="record-wrap"><div class="row"><span class="record-symbol ${r.delta<0?'negative':''}">${icon(r.delta<0?'minus':'plus')}</span><div class="row-main"><div class="row-title">${e(item?.name||'物品')}</div><div class="row-meta">${e(C.clock(r.at,true))} · ${r.kind==='set'?'手动改数':r.delta<0?'减回':'放入'}</div></div><span class="row-number ${r.delta<0?'red':'green'}">${signed(r.delta)}</span></div></div>`;}).join('')||empty('所选范围没有记录')}${data.rows.length>limit?`<button class="small-button egg-more-records" data-action="egg-stats-more">再显示 ${Math.min(80,data.rows.length-limit)} 条（已显示 ${limit} 条）</button>`:''}</section>`;
 }
 function eggActivityChart(buckets,gran){
@@ -209,7 +209,7 @@ function eggRatioView(){
  const total=C.sum(egg.items.map(i=>i.ratio));
  return `${pageHeading('RATIO','放蛋比例',`${egg.items.length} 个物品 · 一轮 ${total} 个 · 已完成 ${round} 轮`)}
  ${eggRatioSwitch()}
- <section class="panel"><h2>每个物品的比例</h2>${egg.items.map(i=>`<div class="ratio-row"><label><span>${e(i.name)}<small>现有 ${fmt(byId[i.id].count)} 个 · 本轮 ${byId[i.id].progress}/${i.ratio}</small></span></label><input class="ratio-input" data-egg-ratio="${e(i.id)}" inputmode="numeric" aria-label="${e(i.name)}的比例" value="${e(draft[i.id]??i.ratio)}"></div>`).join('')}<p class="hint">比例是“一轮里放几个”。占比越小，算法把它排得越开；一轮里每个物品都要放满自己的比例。</p><div class="button-pair" style="margin-top:14px"><button class="secondary-button" data-action="egg-ratio-reset">恢复当前</button><button class="primary-button" data-action="egg-ratio-save">固定此比例</button></div></section>
+ <section class="panel"><h2>每个物品的比例</h2>${egg.items.map(i=>`<div class="ratio-row"><label><span>${e(i.name)}<small>现有 ${fmt(byId[i.id].count)} 个 · 第 ${byId[i.id].itemRound} 轮 ${byId[i.id].itemProgress}/${i.ratio}</small></span></label><input class="ratio-input" data-egg-ratio="${e(i.id)}" inputmode="numeric" aria-label="${e(i.name)}的比例" value="${e(draft[i.id]??i.ratio)}"></div>`).join('')}<p class="hint">比例是“一轮里放几个”。占比越小，算法把它排得越开；一轮里每个物品都要放满自己的比例。</p><div class="button-pair" style="margin-top:14px"><button class="secondary-button" data-action="egg-ratio-reset">恢复当前</button><button class="primary-button" data-action="egg-ratio-save">固定此比例</button></div></section>
  <section class="panel"><h2>只看缺的</h2><p class="inline-caption">放满 ${total} 个正好一轮，多出来的自动算进下一轮。</p><button class="list-button" data-action="egg-only">${icon('target')}<span>${state.eggOnlyLeft?'当前：只显示还缺的':'当前：显示全部物品'}</span>${icon('arrow','chevron')}</button></section>`;
 }
 function ratioView(){
@@ -242,14 +242,14 @@ function sinceText(at){
 }
 function eggCard(p,egg){
  const flash=C.eggLastPlaced(egg)===p.id;
- const pct=p.target?Math.min(100,Math.round(p.progress/p.target*100)):0;
+ const pct=p.target?Math.min(100,Math.round(p.itemProgress/p.target*100)):0;
  const item=egg.items.find(i=>i.id===p.id)||{};
  return `<article class="egg-card${flash?' flash':''}" data-egg="${e(p.id)}">
   <button class="egg-open" data-action="egg-detail" data-id="${e(p.id)}" aria-label="查看${e(p.name)}的记录">
    <span class="egg-head"><span class="egg-name">${e(p.name)}</span></span>
-   <strong class="egg-count${p.target>=10000?' wide':''}" title="本轮 ${p.progress}/${p.target}，累计 ${p.count} 个"><span class="egg-current">${p.progress}</span><small class="egg-denominator">/${p.target}</small></strong>
+   <strong class="egg-count${p.target>=10000?' wide':''}" title="第 ${p.itemRound} 轮 ${p.itemProgress}/${p.target}，累计 ${p.count} 个"><span class="egg-current">${p.itemProgress}</span><small class="egg-denominator">/${p.target}</small></strong>
   </button>
-  <div class="egg-progress" role="progressbar" aria-valuemin="0" aria-valuemax="${p.target}" aria-valuenow="${p.progress}"><span style="width:${pct}%"></span></div>
+  <div class="egg-progress" role="progressbar" aria-valuemin="0" aria-valuemax="${p.target}" aria-valuenow="${p.itemProgress}"><span style="width:${pct}%"></span></div>
   <div class="egg-foot">
    <span class="egg-timer" data-timer="${e(p.id)}" data-timer-prefix="距上次 ">距上次 ${sinceText(C.eggLastChange(egg,p.id))}</span>
    ${state.eggArrange?`<span class="egg-move">
@@ -283,7 +283,7 @@ function eggView(){
  const egg=eggBook();
  if(!egg.items.length)return `<section class="egg-empty">${icon('egg')}<strong>还没有放蛋物品</strong><div class="egg-empty-actions"><button class="primary-button" data-action="egg-add-item">添加物品</button><button class="secondary-button" data-action="page" data-page="ratio">设置比例</button></div></section>`;
  const off=state.eggRoundView?1:0;
- const progress=C.eggProgress(egg).map(p=>{const round=p.round+off,value=Math.min(p.ratio,Math.max(0,p.count-round*p.ratio));return {...p,round,progress:value,left:p.ratio-value};});
+ const progress=C.eggProgress(egg).map(p=>{if(!off)return p;const round=p.round+off,value=Math.min(p.ratio,Math.max(0,p.count-round*p.ratio));return {...p,round,itemRound:round+1,itemProgress:value,left:p.ratio-value};});
  const byId=Object.fromEntries(progress.map(p=>[p.id,p])),ids=eggOrder(egg).filter(id=>byId[id]);
  const shown=state.eggOnlyLeft?ids.filter(id=>byId[id].left>0):ids;
  const pickId=eggPickId(egg),pick=pickId?byId[pickId]:null,round=C.eggRound(egg)+1;
@@ -297,12 +297,12 @@ function eggDetailView(){
  const egg=eggBook(),item=egg.items.find(i=>i.id===state.eggItemID),p=C.eggProgress(egg).find(x=>x.id===state.eggItemID);
  if(!item||!p){state.eggItemID=null;return eggView();}
  const rows=egg.records.filter(r=>r.itemId===p.id).sort((a,b)=>b.at-a.at);
- const round=p.round+1;
+ const round=p.itemRound;
  return `<button class="back-button" data-action="egg-back">${icon('back')}返回放蛋</button>
  <section class="panel egg-detail-head">
   <div class="heading-row"><button class="egg-title" data-action="egg-rename" data-id="${e(item.id)}">${e(item.name)}${icon('edit','tiny')}</button><span class="badge">第 ${round} 轮 · 比例 ${p.ratio}</span></div>
-  <div class="egg-detail-numbers"><div><small>累计</small><strong>${fmt(p.count)}</strong></div><div><small>本轮</small><strong>${p.progress}/${p.target}</strong></div><div><small>距上次</small><strong data-timer="${e(p.id)}">${sinceText(C.eggLastChange(egg,p.id))}</strong></div></div>
-  <div class="egg-progress big" role="progressbar" aria-valuemin="0" aria-valuemax="${p.target}" aria-valuenow="${p.progress}"><span style="width:${Math.min(100,Math.round(p.progress/p.target*100))}%"></span></div>
+  <div class="egg-detail-numbers"><div><small>累计</small><strong>${fmt(p.count)}</strong></div><div><small>本轮</small><strong>${p.itemProgress}/${p.target}</strong></div><div><small>距上次</small><strong data-timer="${e(p.id)}">${sinceText(C.eggLastChange(egg,p.id))}</strong></div></div>
+  <div class="egg-progress big" role="progressbar" aria-valuemin="0" aria-valuemax="${p.target}" aria-valuenow="${p.itemProgress}"><span style="width:${Math.min(100,Math.round(p.itemProgress/p.target*100))}%"></span></div>
   <div class="egg-actions-row"><button class="egg-big minus" data-action="egg-minus" data-id="${e(p.id)}">−1</button><button class="egg-big plus" data-action="egg-add" data-id="${e(p.id)}">+1</button></div>
   <p class="hint">点名字可以改名；下一轮需要 ${p.ratio} 个；全部共 ${fmt(C.eggTotal(egg))} 个。</p>
  </section>

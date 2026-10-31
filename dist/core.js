@@ -136,7 +136,12 @@ export function eggRound(egg){
 }
 export function eggProgress(egg){
  const c=eggCounts(egg),round=eggRound(egg);
- return egg.items.map(i=>({id:i.id,name:i.name,ratio:i.ratio,count:c[i.id],round,progress:c[i.id]-round*i.ratio,left:Math.max(0,i.ratio-(c[i.id]-round*i.ratio)),target:i.ratio}));
+ return egg.items.map(i=>({id:i.id,name:i.name,ratio:i.ratio,count:c[i.id],round,progress:c[i.id]-round*i.ratio,left:Math.max(0,i.ratio-(c[i.id]-round*i.ratio)),target:i.ratio,...eggItemCycle(c[i.id],i.ratio)}));
+}
+// Keep a completed item at 8/8; its ninth placement starts its own next round.
+export function eggItemCycle(count,ratio){
+ const itemRound=Math.max(1,Math.ceil(count/ratio));
+ return {itemRound,itemProgress:count-(itemRound-1)*ratio};
 }
 export function eggRoundComplete(egg){return eggProgress(egg).every(p=>p.left===0);}
 export function eggLastPlaced(egg){const sorted=egg.records.slice().sort((a,b)=>a.at-b.at);return sorted.length?sorted[sorted.length-1].itemId:null;}
@@ -267,7 +272,7 @@ export function eggRecommend(egg,{random=eggRandom}={}){return eggRecommendation
 export function eggStatistics(egg,{range=0,itemId=null,now=Date.now(),hour=null}={}){
  const today=day(now),start=range===3?'':day(now-(range===1?6:range===2?29:0)*86400000);
  const counts=eggCounts(egg),round=egg.items.length?Math.min(...egg.items.map(i=>Math.floor(counts[i.id]/i.ratio))):0;
- const items=egg.items.map(i=>({...i,count:counts[i.id],progress:Math.min(i.ratio,Math.max(0,counts[i.id]-round*i.ratio)),
+ const items=egg.items.map(i=>({...i,count:counts[i.id],progress:eggItemCycle(counts[i.id],i.ratio).itemProgress,...eggItemCycle(counts[i.id],i.ratio),
   left:Math.max(0,i.ratio-(counts[i.id]-round*i.ratio)),added:0,removed:0,manualNet:0,net:0,records:0,lastPlacedAt:0}));
  const byId=Object.fromEntries(items.map(i=>[i.id,i]));
  const blank=()=>({added:0,removed:0,manualNet:0,net:0,records:0});
