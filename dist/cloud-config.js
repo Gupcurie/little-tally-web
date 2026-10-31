@@ -1,7 +1,7 @@
-// These are public project settings, never a service_role / secret key.
-// Leave blank until the owner has connected a Supabase project.
-export const cloudConfig=Object.freeze({authEnabled:false,
- url:'https://ppvhgoflxqevfdcvweai.supabase.co',
- publishableKey:"sb_publishable__l5eyBR_uzfNfd2vXVKxyw_2m7kr-lg",
- redirectUrl:'',
+// Public client configuration. Never put administrator or SMTP secrets here.
+export const cloudConfig=Object.freeze({
+ authEnabled:false,
+ url:'https://pinztkcvnaswsiorhaun.supabase.co',
+ publishableKey:'sb_publishable_V_F2efdgxyoiL4_EbDfetQ_KgQQ8daV',
+ redirectUrl:'https://gupcurie.github.io/little-tally-web/',
 });

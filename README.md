@@ -69,4 +69,4 @@ https://supabase.com/docs/guides/auth/auth-smtp
 
 网站：https://gupcurie.github.io/little-tally-web/
 
-GitHub Pages 已发布；数据库迁移及账户隔离验证完成。邮箱登录仍等待项目所有者在后台配置 URL 白名单和自定义 SMTP，因此 `cloudConfig.authEnabled` 暂设为 `false`。完成以上配置后，设为 `true` 并提交，部署后用两名真实使用者邮箱验证登录及再次登录数据恢复，再开放多人使用。密码或 SMTP 授权码仅在服务商后台填写。
+GitHub Pages 已发布；数据库迁移及账户隔离验证完成。当前使用 Gupcurie 账户下 Little Tally 免费组织的新项目 `pinztkcvnaswsiorhaun`，数据库及 URL 白名单已配置。邮箱登录仍等待项目所有者配置自定义 SMTP，因此 `cloudConfig.authEnabled` 暂设为 `false`。完成以上配置后，设为 `true` 并提交，部署后用两名真实使用者邮箱验证登录及再次登录数据恢复，再开放多人使用。密码或 SMTP 授权码仅在服务商后台填写。

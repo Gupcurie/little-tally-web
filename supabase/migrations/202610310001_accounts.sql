@@ -23,6 +23,7 @@ create table if not exists tally_private.backups (
  saved_at timestamptz not null,
  primary key(user_id,revision)
 );
+alter table tally_private.backups enable row level security;
 revoke all on tally_private.backups from public, anon, authenticated;
 
 create or replace function tally_private.validate_snapshot(s jsonb)
