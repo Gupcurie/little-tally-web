@@ -262,6 +262,36 @@ export function eggRecommendationSet(egg,count=4,random=eggRandom){
   .sort((a,b)=>Number(b.preferred)-Number(a.preferred)||b.score-a.score).slice(0,Math.max(0,count));
 }
 export function eggRecommend(egg,{random=eggRandom}={}){return eggRecommendationSet(egg,1,random)[0]||null;}
+// Read-only statistics. A physical placement, a removal and a manual correction
+// are distinct operations; their deltas still all contribute to the current count.
+export function eggStatistics(egg,{range=0,itemId=null,now=Date.now(),hour=null}={}){
+ const today=day(now),start=range===3?'':day(now-(range===1?6:range===2?29:0)*86400000);
+ const counts=eggCounts(egg),round=egg.items.length?Math.min(...egg.items.map(i=>Math.floor(counts[i.id]/i.ratio))):0;
+ const items=egg.items.map(i=>({...i,count:counts[i.id],progress:Math.min(i.ratio,Math.max(0,counts[i.id]-round*i.ratio)),
+  left:Math.max(0,i.ratio-(counts[i.id]-round*i.ratio)),added:0,removed:0,manualNet:0,net:0,records:0,lastPlacedAt:0}));
+ const byId=Object.fromEntries(items.map(i=>[i.id,i]));
+ const blank=()=>({added:0,removed:0,manualNet:0,net:0,records:0});
+ const summary=blank(),hours=Array.from({length:24},blank),minutes=Array.from({length:60},blank),days=Object.create(null),rows=[];
+ const add=(bucket,r)=>{bucket.net+=r.delta;bucket.records++;if(r.kind==='set')bucket.manualNet+=r.delta;else if(r.delta>0)bucket.added+=r.delta;else bucket.removed-=r.delta;};
+ for(const r of egg.records){
+  const item=byId[r.itemId];if(!item||r.at>now)continue;
+  if(r.kind==='count'&&r.delta>0)item.lastPlacedAt=Math.max(item.lastPlacedAt,r.at);
+  const date=day(r.at);if(date>today||(start&&date<start))continue;
+  add(item,r);
+  if(itemId&&r.itemId!==itemId)continue;
+  rows.push(r);add(summary,r);add(hours[hourAt(r.at)],r);
+  if(!days[date])days[date]=blank();add(days[date],r);
+ }
+ const selectedHour=Number.isInteger(hour)&&hour>=0&&hour<24?hour:
+  rows.length?hours.reduce((best,bucket,h)=>bucket.added+bucket.removed>hours[best].added+hours[best].removed?h:best,0):hourAt(now);
+ for(const r of rows)if(hourAt(r.at)===selectedHour)add(minutes[minute(r.at)],r);
+ rows.sort((a,b)=>b.at-a.at||String(b.id).localeCompare(String(a.id)));
+ return {rows,items,summary,hours,minutes,days,hour:selectedHour,start,end:today,
+  total:sum(items.map(i=>i.count)),completedRounds:round,currentRound:round+1,left:sum(items.map(i=>i.left)),
+  activeItems:new Set(rows.map(r=>r.itemId)).size};
+}
+// Keep the public option named `hour` while using the shared Beijing-time helper.
+const hourAt=at=>hour(at);
 export class LocalLedger {
  constructor(storage,key='little-tally-pocket-v1') {this.storage=storage;this.key=key;this.state=initialState();this.raw=null;this.readOnly=false;this.error=null;this.reload();}
  reload(){try{const raw=this.storage.getItem(this.key);if(raw!==null){this.state=validateState(JSON.parse(raw));this.raw=raw;}else{this.raw=null;}this.readOnly=false;this.error=null;}catch(e){this.readOnly=true;this.error='本地记录未能读取，原文件没有被覆盖。请先导出原文件，再从备份恢复。';}return !this.readOnly;}

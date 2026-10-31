@@ -27,7 +27,7 @@ const loadEggMode=()=>{try{const raw=localStorage.getItem('little-tally-egg-mode
 const saveEggMode=value=>{try{localStorage.setItem('little-tally-egg-mode',value?'1':'0');}catch{}};
 const loadBooks=()=>{try{const raw=JSON.parse(localStorage.getItem('little-tally-books')||'null');if(raw&&typeof raw==='object')return {sales:raw.sales!==false,stock:raw.stock!==false,egg:raw.egg!==false};}catch{}return {sales:true,stock:true,egg:true};};
 const saveBooks=books=>{try{localStorage.setItem('little-tally-books',JSON.stringify(books));}catch{}};
-Object.assign(state,{eggPick:null,eggOnlyLeft:false,eggItemID:null,eggSelecting:false,eggSelection:new Set(),eggArrange:false,eggDraft:null,eggCols:2,tabDrag:null,books:loadBooks(),statsGran:'hour',statsItem:null});
+Object.assign(state,{eggPick:null,eggMotionKey:null,eggStatsLimit:80,eggOnlyLeft:false,eggItemID:null,eggSelecting:false,eggSelection:new Set(),eggArrange:false,eggDraft:null,eggCols:2,tabDrag:null,books:loadBooks(),statsGran:'hour',statsItem:null});
 const enabledBooks=()=>['sales','stock','egg'].filter(k=>state.books[k]);
 const eggMode=()=>enabledBooks().length===1&&state.books.egg;
 let TABS=loadTabs();
@@ -49,7 +49,17 @@ function render(){
   try{main.innerHTML=({count:countView,egg:eggView,history:historyView,stats:statsViewNew,ratio:ratioView,settings:settingsView}[state.page]||countView)();}
   catch(err){state.eggItemID=null;state.page='count';main.innerHTML=countView();toast('这个页面刚刚没打开，已回到记数页。');}
  }
- layoutVars();fitItemGrid();fitEggGrid();
+ layoutVars();fitItemGrid();fitEggGrid();animateEggRecommendation();
+}
+function animateEggRecommendation(){
+ const box=main.querySelector('.egg-reco');
+ if(!box){state.eggMotionKey=null;return;}
+ const key=JSON.stringify([state.eggPick?.key,state.eggPick?.id]),previous=state.eggMotionKey;
+ state.eggMotionKey=key;
+ if(!previous||key===previous||matchMedia('(prefers-reduced-motion: reduce)').matches)return;
+ box.classList.add('reco-updated');
+ const name=box.querySelector('strong');
+ if(typeof name?.animate==='function')name.animate([{opacity:0.4,transform:'translateY(4px)'},{opacity:1,transform:'translateY(0)'}],{duration:240,easing:'cubic-bezier(.2,.7,.3,1)'});
 }
 function fitItemGrid(){
  const grid=main.querySelector('.count-dashboard .item-grid');if(!grid)return;
@@ -115,7 +125,7 @@ function eggSummaryPanel(){
 function statsViewNew(){
  if(state.book==='egg')return eggStatsView();
  const b=book(),items=b.items,rows=filteredRecords();
- const filter=state.statsItem||null,gran=state.statsGran||'hour';
+ const filter=state.statsItem||null,gran=['hour','minute'].includes(state.statsGran)?state.statsGran:'hour';
  const busiest=Array(24).fill(0);for(const r of rows)if(r.delta>0)busiest[C.hour(r.at)]+=r.delta;
  let hour=state.selectedHour;if(hour===null){let best=0;for(let h=1;h<24;h++)if(busiest[h]>busiest[best])best=h;hour=best;}
  const c=Object.fromEntries(items.map(i=>[i.id,0]));for(const r of rows)c[r.itemId]+=r.delta;
@@ -132,16 +142,32 @@ function statsViewNew(){
  <section class="panel"><h2>物品占比与排行</h2>${items.slice().sort((x,y)=>c[y.id]-c[x.id]).map(i=>{const p=pos?Math.max(0,c[i.id])/pos*100:0;return `<div class="rank-row"><div class="rank-title"><span>${e(i.name)}</span><small>${fmt(c[i.id])} 件 · ${p.toFixed(1)}%</small></div><div class="rank-track"><div class="rank-fill" style="width:${p}%"></div></div></div>`;}).join('')}</section>`;
 }
 function eggStatsView(){
- const egg=eggBook(),rows=egg.records.slice().sort((a,b)=>b.at-a.at);
- if(!egg.items.length)return `${pageHeading('A LITTLE MORE RHYTHM','放蛋统计','添加物品后这里就有数据。')}${bookPicker()}${empty('还没有放蛋物品','去放蛋页添加。')}`;
- const total=C.eggTotal(egg),round=C.eggRound(egg),progress=C.eggProgress(egg);
- const hours=Array(24).fill(0);for(const r of rows)hours[C.hour(r.at)]+=r.delta;
- const max=Math.max(1,...hours),min=Math.min(0,...hours),height=max-min,zero=max/height*100;
- const peak=Math.max(1,...progress.map(p=>p.count));
- return `${pageHeading('A LITTLE MORE RHYTHM','放蛋统计',`共 ${fmt(total)} 个 · 已完成 ${round} 轮 · ${egg.items.length} 个物品`)}${bookPicker()}
- <div class="metric-grid"><div><small>总件数</small><strong>${fmt(total)}</strong></div><div><small>记录次数</small><strong>${fmt(rows.length)}</strong></div><div><small>已完成轮数</small><strong>${round}</strong></div></div>
- <section class="panel"><div class="heading-row"><h2 style="margin:0">时段分布</h2><span class="badge">24 H</span></div>${rows.length?`<div class="chart" role="group" aria-label="每小时净增加柱状图">${hours.map((n,h)=>`<span class="bar-column" aria-label="${h}点${n}个"><span class="bar ${n<0?'negative':''}" style="height:${Math.abs(n)/height*100}%;top:${n>=0?(max-n)/height*100:zero}%"></span></span>`).join('')}</div><div class="chart-labels"><span>00:00</span><span>06:00</span><span>12:00</span><span>18:00</span><span>23:00</span></div>`:empty('还没有记录','放几个就有分布了。')}</section>
- <section class="panel"><h2>每个物品</h2>${progress.slice().sort((a,b)=>b.count-a.count).map(p=>`<div class="rank-row"><div class="rank-title"><span>${e(p.name)}</span><small>${fmt(p.count)} 个 · 比例 ${p.ratio} · 本轮 ${p.progress}/${p.ratio}</small></div><div class="rank-track"><div class="rank-fill" style="width:${Math.round(p.count/peak*100)}%"></div></div></div>`).join('')}</section>`;
+ const egg=eggBook(),filter=egg.items.some(i=>i.id===state.statsItem)?state.statsItem:null;
+ const data=C.eggStatistics(egg,{range:state.range,itemId:filter,hour:state.selectedHour});
+ const gran=['day','hour','minute'].includes(state.statsGran)?state.statsGran:'hour';
+ const name=filter?egg.items.find(i=>i.id===filter).name:'全部物品';
+ const summary=data.summary,limit=state.eggStatsLimit||80;
+ const dayCount=state.range===0?1:state.range===1?7:30;
+ const buckets=gran==='hour'?data.hours:gran==='minute'?data.minutes:Array.from({length:dayCount},(_,i)=>{
+  const key=C.day(Date.now()-(dayCount-1-i)*86400000);return {...(data.days[key]||{added:0,removed:0,manualNet:0,net:0,records:0}),label:key.slice(5)};
+ });
+ const signed=n=>(n>0?'+':'')+fmt(n);
+ return `${pageHeading('','放蛋统计',`当前总数 ${fmt(data.total)} 个 · 已完成 ${data.completedRounds} 轮 · 本轮还缺 ${fmt(data.left)} 个`)}${bookPicker()}${rangePills()}
+ <div class="egg-stats-scope">${e(name)} · ${['今天','近 7 天','近 30 天','全部记录'][state.range]||'今天'}</div>
+ <div class="metric-grid egg-stat-metrics"><div><small>放入</small><strong>${fmt(summary.added)}</strong></div><div><small>减回</small><strong>${fmt(summary.removed)}</strong></div><div><small>净变化</small><strong>${signed(summary.net)}</strong></div><div><small>手改净量</small><strong>${signed(summary.manualNet)}</strong></div><div><small>记录次数</small><strong>${fmt(summary.records)}</strong></div><div><small>活跃物品</small><strong>${data.activeItems}</strong></div></div>
+ <section class="panel"><div class="heading-row"><h2 style="margin:0">放蛋时段</h2><div class="book-switch egg-gran-switch">${[['day','按天'],['hour','按小时'],['minute','按分钟']].map(([key,label])=>`<button data-action="stats-gran" data-gran="${key}" class="${gran===key?'active':''}">${label}</button>`).join('')}</div></div>
+ ${gran==='minute'?`<label class="egg-hour-select">查看小时 <select class="field-select" data-egg-stats-hour aria-label="查看哪个小时">${Array.from({length:24},(_,h)=>`<option value="${h}" ${h===data.hour?'selected':''}>${String(h).padStart(2,'0')}:00–${String(h).padStart(2,'0')}:59</option>`).join('')}</select></label>`:''}
+ ${eggActivityChart(buckets,gran)}
+ <div class="egg-chart-key"><span><i class="egg-key-add"></i>放入</span><span><i class="egg-key-remove"></i>减回</span></div>
+ <p class="hint">${gran==='day'&&state.range===3?'日趋势显示近 30 天；上方指标与下方明细包含全部记录。':gran==='hour'?'点小时柱可查看该小时的 60 分钟。':gran==='minute'?`显示 ${String(data.hour).padStart(2,'0')} 点的 60 分钟。`:''} 手动改数单独计入“手改净量”和明细。</p>${legendRow(egg.items,filter)}</section>
+ <section class="panel"><h2>物品数量与本轮进度</h2>${data.items.map(i=>`<div class="egg-stat-item"><div class="rank-title"><button class="egg-stat-name" data-action="stats-filter" data-id="${e(i.id)}">${e(i.name)}</button><strong>累计 ${fmt(i.count)} 个</strong></div><div class="egg-stat-detail">本轮 ${i.progress}/${i.ratio} · 放入 ${fmt(i.added)} · 减回 ${fmt(i.removed)} · 手改 ${signed(i.manualNet)}</div><div class="rank-track"><div class="rank-fill" style="width:${Math.min(100,i.progress/i.ratio*100)}%"></div></div><div class="egg-stat-detail">${i.lastPlacedAt?'最近放入 '+e(C.clock(i.lastPlacedAt,true)):'暂无放入记录'}</div></div>`).join('')||'<p class="hint">还没有物品。</p>'}</section>
+ <section class="panel"><div class="heading-row"><h2 style="margin:0">操作明细</h2><span class="inline-caption">${fmt(summary.records)} 条</span></div><p class="hint">净变化 = 放入 − 减回 + 手改净量；时间为北京时间。</p>${data.rows.slice(0,limit).map(r=>{const item=egg.items.find(i=>i.id===r.itemId);return `<div class="record-wrap"><div class="row"><span class="record-symbol ${r.delta<0?'negative':''}">${icon(r.delta<0?'minus':'plus')}</span><div class="row-main"><div class="row-title">${e(item?.name||'物品')}</div><div class="row-meta">${e(C.clock(r.at,true))} · ${r.kind==='set'?'手动改数':r.delta<0?'减回':'放入'}</div></div><span class="row-number ${r.delta<0?'red':'green'}">${signed(r.delta)}</span></div></div>`;}).join('')||empty('所选范围没有记录')}${data.rows.length>limit?`<button class="small-button egg-more-records" data-action="egg-stats-more">再显示 ${Math.min(80,data.rows.length-limit)} 条（已显示 ${limit} 条）</button>`:''}</section>`;
+}
+function eggActivityChart(buckets,gran){
+ const positive=Math.max(0,...buckets.map(b=>b.added)),negative=Math.max(0,...buckets.map(b=>b.removed)),span=Math.max(1,positive+negative),zero=positive+negative?positive/span*100:100;
+ const label=i=>gran==='day'?buckets[i].label:gran==='minute'?String(i).padStart(2,'0')+'分':i+'点';
+ const ticks=[...new Set([0,Math.floor((buckets.length-1)/2),buckets.length-1])];
+ return `<div class="chart egg-activity-chart" style="--zero:${zero}%" role="group" aria-label="放蛋${gran==='day'?'每日':gran==='minute'?'每分钟':'每小时'}放入与减回数量">${buckets.map((b,i)=>{const content=`<span class="bar" style="height:${b.added/span*100}%;top:${(positive-b.added)/span*100}%"></span><span class="bar negative" style="height:${b.removed/span*100}%;top:${zero}%"></span>`;const description=`${label(i)}：放入 ${b.added}，减回 ${b.removed}，手改 ${b.manualNet}`;return gran==='hour'?`<button class="bar-column" data-action="stats-hour" data-hour="${i}" aria-label="${e(description)}">${content}</button>`:`<span class="bar-column" title="${e(description)}" aria-label="${e(description)}">${content}</span>`;}).join('')}</div><div class="chart-labels">${ticks.map(i=>`<span>${e(label(i))}</span>`).join('')}</div>`;
 }
 function itemColor(index){return palette[Math.abs(index)%palette.length];}
 function chartBlock(records,items,{gran='hour',hour=null,filter=null}={}){
@@ -220,8 +246,8 @@ function eggCard(p,egg){
  const item=egg.items.find(i=>i.id===p.id)||{};
  return `<article class="egg-card${flash?' flash':''}" data-egg="${e(p.id)}">
   <button class="egg-open" data-action="egg-detail" data-id="${e(p.id)}" aria-label="查看${e(p.name)}的记录">
-   <span class="egg-head"><span class="egg-name">${e(p.name)}</span><span class="egg-round">${p.progress}/${p.target}</span></span>
-   <strong class="egg-count">${fmt(p.count)}</strong>
+   <span class="egg-head"><span class="egg-name">${e(p.name)}</span></span>
+   <strong class="egg-count${p.target>=10000?' wide':''}" title="本轮 ${p.progress}/${p.target}，累计 ${p.count} 个"><span class="egg-current">${p.progress}</span><small class="egg-denominator">/${p.target}</small></strong>
   </button>
   <div class="egg-progress" role="progressbar" aria-valuemin="0" aria-valuemax="${p.target}" aria-valuenow="${p.progress}"><span style="width:${pct}%"></span></div>
   <div class="egg-foot">
@@ -275,7 +301,7 @@ function eggDetailView(){
  return `<button class="back-button" data-action="egg-back">${icon('back')}返回放蛋</button>
  <section class="panel egg-detail-head">
   <div class="heading-row"><button class="egg-title" data-action="egg-rename" data-id="${e(item.id)}">${e(item.name)}${icon('edit','tiny')}</button><span class="badge">第 ${round} 轮 · 比例 ${p.ratio}</span></div>
-  <div class="egg-detail-numbers"><div><small>当前</small><strong>${fmt(p.count)}</strong></div><div><small>本轮</small><strong>${p.progress}/${p.target}</strong></div><div><small>距上次</small><strong data-timer="${e(p.id)}">${sinceText(C.eggLastChange(egg,p.id))}</strong></div></div>
+  <div class="egg-detail-numbers"><div><small>累计</small><strong>${fmt(p.count)}</strong></div><div><small>本轮</small><strong>${p.progress}/${p.target}</strong></div><div><small>距上次</small><strong data-timer="${e(p.id)}">${sinceText(C.eggLastChange(egg,p.id))}</strong></div></div>
   <div class="egg-progress big" role="progressbar" aria-valuemin="0" aria-valuemax="${p.target}" aria-valuenow="${p.progress}"><span style="width:${Math.min(100,Math.round(p.progress/p.target*100))}%"></span></div>
   <div class="egg-actions-row"><button class="egg-big minus" data-action="egg-minus" data-id="${e(p.id)}">−1</button><button class="egg-big plus" data-action="egg-add" data-id="${e(p.id)}">+1</button></div>
   <p class="hint">点名字可以改名；下一轮需要 ${p.ratio} 个；全部共 ${fmt(C.eggTotal(egg))} 个。</p>
@@ -353,7 +379,7 @@ async function action(a,node){
  if(a==='sync-cloud'){await ledger.reload();render();toast('已读取当前账户最新的云端记录。');return;}
  if(a==='logout'){confirmSheet('退出当前账户？','云端记录会保留。本页面和当前账户的本机备用副本会清除，下次登录会重新读取云端记录。',async()=>{await ledger.logout();state.itemID=null;state.selection.clear();state.ratioValues=Object.create(null);state.ratioSelected.clear();closeSheet();render();},'退出登录');return;}
  if(a==='close-sheet'){closeSheet();return;}
- if(a==='page'){if(node.dataset.book)state.book=node.dataset.book;state.page=node.dataset.page;state.itemID=null;state.eggItemID=null;state.eggSelecting=false;state.eggSelection.clear();state.keyword='';state.selection.clear();state.selecting=false;state.range=state.page==='history'?3:0;if(state.page!=='ratio'&&state.page!=='stats'&&state.book==='egg')state.book='sales';if(state.page==='ratio')loadRatio();history.replaceState(null,'','#'+state.page);render();window.scrollTo({top:0});return;}
+ if(a==='page'){if(state.page==='egg'&&['stats','history','ratio'].includes(node.dataset.page)&&!node.dataset.book)state.book='egg';if(node.dataset.book)state.book=node.dataset.book;state.page=node.dataset.page;state.itemID=null;state.eggItemID=null;state.eggSelecting=false;state.eggSelection.clear();state.keyword='';state.selection.clear();state.selecting=false;state.range=state.page==='history'?3:0;if(!['ratio','stats','history'].includes(state.page)&&state.book==='egg')state.book='sales';if(state.page==='ratio')loadRatio();history.replaceState(null,'','#'+state.page);render();window.scrollTo({top:0});return;}
  if(a==='book'){state.book=node.dataset.book;state.itemID=null;state.eggItemID=null;state.keyword='';state.selection.clear();state.selecting=false;state.ratioPlan=null;state.selectedHour=null;state.eggDraft=null;if(state.book!=='egg')loadRatio();render();return;}
  if(a==='install'){installHelp();return;}
  if(a==='detail'){state.itemID=id;render();window.scrollTo({top:0});return;}
@@ -364,7 +390,8 @@ async function action(a,node){
  if(a==='egg-next-round'){state.eggRoundView=state.eggRoundView?0:1;render();return;}
  if(a==='egg-rename'){const item=eggBook().items.find(i=>i.id===id);if(!item)return;showSheet('修改名字',`<label class="field-label" for="name">物品名称</label><input class="field-input" id="name" name="name" maxlength="40" value="${e(item.name)}">`,async fd=>{await mutateEgg(egg=>C.eggRename(egg,id,String(fd.get('name')||'')));return true;});return;}
  if(a==='stats-gran'){state.statsGran=node.dataset.gran;render();return;}
- if(a==='stats-filter'){const id=node.dataset.id||null;state.statsItem=state.statsItem===id?null:id;state.range=0;state.selectedHour=null;render();return;}
+ if(a==='stats-filter'){const id=node.dataset.id||null;state.statsItem=state.statsItem===id?null:id;if(state.book!=='egg')state.range=0;state.selectedHour=null;state.eggStatsLimit=80;render();return;}
+ if(a==='egg-stats-more'){state.eggStatsLimit=(state.eggStatsLimit||80)+80;render();return;}
  if(a==='stats-hour'){state.selectedHour=Number(node.dataset.hour);state.statsGran='minute';render();return;}
  if(a==='egg-mode'){state.books={sales:state.books.sales,stock:state.books.stock,egg:!state.books.egg};saveBooks(state.books);render();return;}
  if(a==='book-toggle'){const k=node.dataset.book,next={...state.books,[k]:!state.books[k]};if(!next.sales&&!next.stock&&!next.egg){toast('至少要留一个功能。');return;}state.books=next;saveBooks(next);if(!enabledBooks().includes(state.book))state.book=enabledBooks()[0];if(!next.egg&&state.page==='egg'){state.page='count';state.eggItemID=null;history.replaceState(null,'','#count');}if(!next.sales&&!next.stock&&state.page==='count'){state.page='egg';history.replaceState(null,'','#egg');}render();return;}
@@ -394,7 +421,7 @@ async function action(a,node){
  if(a==='add-part'){showSheet('添加库存分项','<p>例如：未拆、已拆、瑕疵品。新增分项的初始数量为 0。</p><label class="field-label" for="name">分项名称</label><input class="field-input" id="name" name="name" maxlength="20" autocomplete="off">',async fd=>{const name=String(fd.get('name')).trim();const i=book().items.find(i=>i.id===id);if(Object.hasOwn(i.breakdown,name))throw new Error('分项名称已存在。');await mutate(b=>C.setPart(b,id,name,0));return true;});return;}
  if(a==='edit-part'){const i=book().items.find(i=>i.id===id);showSheet(`修改 ${part}`,`<p>增加时优先从未分类划入；减少时会扣减总库存。</p><label class="field-label" for="amount">分项数量</label><input class="field-input" id="amount" name="amount" inputmode="numeric" value="${i.breakdown[part]}">`,async fd=>{const n=C.numberInput(String(fd.get('amount')));await mutate(b=>C.setPart(b,id,part,n));return true;});return;}
  if(a==='delete-part'){confirmSheet(`删除“${part}”分项？`,'其数量会并入未分类，总库存保持不变。',async()=>{await mutate(b=>C.deletePart(b,id,part));},'删除分项');return;}
- if(a==='range'){state.range=Number(node.dataset.range);state.selectedHour=null;state.selection.clear();render();return;}
+ if(a==='range'){state.eggStatsLimit=80;state.range=Number(node.dataset.range);state.selectedHour=null;state.selection.clear();render();return;}
  if(a==='more-history'){state.historyLimit+=80;render();return;}
  if(a==='select-records'){state.selecting=!state.selecting;state.selection.clear();render();return;}
  if(a==='select-all'){state.selection=new Set(filteredRecords().map(r=>r.id));render();return;}
@@ -450,7 +477,7 @@ document.addEventListener('click',event=>{if(suppressClick){suppressClick=false;
 document.addEventListener('submit',async event=>{if(event.target.id!=='account-form')return;event.preventDefault();const form=event.target,button=event.submitter,message=document.querySelector('#account-message'),values=new FormData(form),username=String(values.get('username')||''),password=String(values.get('password')||'');button.disabled=true;message.textContent=state.authMode==='register'?'正在创建账户…':'正在登录…';try{if(state.authMode==='register'){if(password!==values.get('confirm'))throw new Error('两次输入的密码不一致。');await ledger.register(username,password);}else await ledger.login(username,password);}catch(err){if(message.isConnected){message.className='sheet-error';message.textContent=err.message;}}finally{const field=form.querySelector('[name="password"]'),confirm=form.querySelector('[name="confirm"]');if(field)field.value='';if(confirm)confirm.value='';if(button.isConnected)button.disabled=false;}});
 
 document.addEventListener('submit',async event=>{if(event.target.id!=='sheet-form')return;event.preventDefault();if(!formSubmit)return;const submit=event.submitter;if(submit)submit.disabled=true;try{document.querySelector('#sheet-error').textContent='';const done=await formSubmit(new FormData(event.target));if(done)closeSheet();}catch(err){document.querySelector('#sheet-error').textContent=err.message||'没有保存成功，请重试。';}finally{if(submit?.isConnected)submit.disabled=false;}});
-document.addEventListener('change',event=>{const node=event.target;if(node.dataset.eggRecord){node.checked?state.eggSelection.add(node.dataset.eggRecord):state.eggSelection.delete(node.dataset.eggRecord);const actions=main.querySelector('.selection-actions');if(actions){const button=actions.querySelector('.remove');button.textContent=`删除 ${state.eggSelection.size} 条`;button.disabled=!state.eggSelection.size;}return;}if(node.dataset.record){node.checked?state.selection.add(node.dataset.record):state.selection.delete(node.dataset.record);const actions=main.querySelector('.selection-actions');if(actions){const button=actions.querySelector('.remove');button.textContent=`删除 ${state.selection.size} 条`;button.disabled=!state.selection.size;}return;}if(node.dataset.ratioCheck){const id=node.dataset.ratioCheck;node.checked?state.ratioSelected.add(id):state.ratioSelected.delete(id);if(!Object.hasOwn(state.ratioValues,id))state.ratioValues[id]='1';state.ratioPlan=null;state.ratioError=null;render();return;}if(node.id==='base-select'){state.baseID=node.value;render();}});
+document.addEventListener('change',event=>{const node=event.target;if(node.hasAttribute('data-egg-stats-hour')){state.selectedHour=Number(node.value);render();return;}if(node.dataset.eggRecord){node.checked?state.eggSelection.add(node.dataset.eggRecord):state.eggSelection.delete(node.dataset.eggRecord);const actions=main.querySelector('.selection-actions');if(actions){const button=actions.querySelector('.remove');button.textContent=`删除 ${state.eggSelection.size} 条`;button.disabled=!state.eggSelection.size;}return;}if(node.dataset.record){node.checked?state.selection.add(node.dataset.record):state.selection.delete(node.dataset.record);const actions=main.querySelector('.selection-actions');if(actions){const button=actions.querySelector('.remove');button.textContent=`删除 ${state.selection.size} 条`;button.disabled=!state.selection.size;}return;}if(node.dataset.ratioCheck){const id=node.dataset.ratioCheck;node.checked?state.ratioSelected.add(id):state.ratioSelected.delete(id);if(!Object.hasOwn(state.ratioValues,id))state.ratioValues[id]='1';state.ratioPlan=null;state.ratioError=null;render();return;}if(node.id==='base-select'){state.baseID=node.value;render();}});
 document.addEventListener('input',event=>{const node=event.target;if(node.dataset.eggRatio){if(!state.eggDraft)state.eggDraft={};state.eggDraft[node.dataset.eggRatio]=node.value;return;}if(node.id==='history-search'){state.keyword=node.value;state.selection.clear();document.querySelector('#history-list').innerHTML=historyRows(filteredRecords());document.querySelector('#history-count').textContent=`${filteredRecords().length} 条记录`;return;}if(node.dataset.ratioValue){state.ratioValues[node.dataset.ratioValue]=node.value;state.ratioPlan=null;state.ratioError=null;}});
 fileInput.addEventListener('change',async()=>{const file=fileInput.files?.[0];if(!file)return;try{if(file.size>20*1024*1024)throw new Error('备份不能超过 20 MB。');const text=await file.text();if(restoreExpected==='all'){
  const next=C.validateState(JSON.parse(text));backupReady=next;const n=next.sales.records.length+next.stock.records.length;
