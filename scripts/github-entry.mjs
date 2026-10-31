@@ -1,7 +1,8 @@
-import {mkdir,writeFile,copyFile} from 'node:fs/promises';
-const out='dist-github',site='https://little-tally-pocket-455b.sharp-wave-4678.chatgpt.site';
-await mkdir(out,{recursive:true});
-for(const f of ['storage.js','core.js','icon.svg'])await copyFile('dist/'+f,out+'/'+f);
-await writeFile(out+'/index.html',`<!doctype html><html lang="zh-CN"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>小小记 · 打开新版</title><link rel="icon" href="./icon.svg"><style>body{font-family:system-ui,sans-serif;background:#f5f6ef;color:#294335;margin:0;padding:70px 24px}main{max-width:420px;margin:auto;background:white;padding:30px;border-radius:24px}h1{font-size:30px}p{line-height:1.8;color:#68776c}a,button{display:block;box-sizing:border-box;width:100%;padding:16px;border-radius:14px;text-align:center;font:inherit;cursor:pointer}a{background:#386b4f;color:white;text-decoration:none}button{margin-top:16px;background:white;color:#386b4f;border:1px solid #d5ded4}small{display:block;line-height:1.7;color:#7c867e;margin-top:20px}</style><main><h1>每一笔，接着记。</h1><p>用户名密码版已就绪。注册只需用户名和密码，每个账户单独保存记录。</p><a href="${site}">打开用户名密码版 →</a><p>如果你在旧网页使用过“本机体验”，先导出备份，再到新版的设置里导入。</p><button id="backup">导出旧网页的本机数据</button><small id="message">原有本机记录仍在这个浏览器里，不会因新版入口而删除。</small></main><script type="module">import {BrowserLedger} from './storage.js';document.querySelector('#backup').onclick=async()=>{const msg=document.querySelector('#message');try{const ledger=await new BrowserLedger().init();const raw=ledger.readOnly?ledger.raw():JSON.stringify(ledger.state,null,2);const u=URL.createObjectURL(new Blob([raw],{type:'application/json'})),a=document.createElement('a');a.href=u;a.download='小小记-旧网页备份.json';a.click();setTimeout(()=>URL.revokeObjectURL(u),30000);ledger.channel?.close();msg.textContent='备份已导出。请保存到文件，再到新版设置里导入。';}catch{msg.textContent='读取未完成，请保留当前浏览器数据，联系创建者处理。';}};</script></html>`);
-await writeFile(out+'/.nojekyll','');
-console.log('Built the GitHub entry and local backup exporter.');
+import {cp,mkdir,readFile,writeFile,rm} from 'node:fs/promises';
+const out='dist-github';
+await rm(out,{recursive:true,force:true});await mkdir(out,{recursive:true});await cp('dist',out,{recursive:true});
+let html=await readFile(out+'/index.html','utf8');
+html=html.replace('<meta charset="utf-8">',`<meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; connect-src 'self' https://pinztkcvnaswsiorhaun.supabase.co; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self'; object-src 'none'; base-uri 'self'; form-action 'none'">`);
+await writeFile(out+'/index.html',html);
+console.log('Built the complete GitHub app with local assets and restricted network destinations.');

@@ -1,84 +1,47 @@
-# 小小记 · 账户云端版
+# 小小记网页版
 
-手机网页记数工具。GitHub Pages 托管静态页面，Supabase Auth 和 PostgreSQL 保存各账户的账本。界面为中文，适合添加到手机主屏幕。
+手机记数与库存工具：用户名密码注册登录，销售和库存独立，支持时间记录、历史筛选、比例计算、JSON 导入导出和主屏幕安装。密码 6–128 位，允许纯数字、纯字母或其他组合；目前没有自助密码找回。
 
-## 功能
+## 访问地址
 
-- 销售、库存两个独立账本；加减、改数、管理物品、库存分项。
-- 历史筛选及删除、北京时间统计、比例计算、固定目标。
-- 每个账户独立云端记录；再次登录读取云端最新版本。
-- 收到数据库提交确认后才更新数量。保存状态未知时暂停编辑，要求重新同步，避免重复加减。
-- 数据库版本比较，防止两台设备静默覆盖；写入重试使用同一 mutation ID，保证幂等。
-- 云端保留最近 5 个历史版本，另有按账户区分的本机副本和手动 JSON 导出。
-- 登出清理当前界面与该账户的本机缓存，保留云端数据。
-- 本机体验模式使用 `?local=1`，明确标示不含账户和云端同步，数据不会自动归入后来登录的账户。
+- GitHub 直开试用：https://gupcurie.github.io/little-tally-web/
+- 原用户名密码版：https://little-tally-pocket-455b.sharp-wave-4678.chatgpt.site/
 
-## 登录方式
+两个入口使用同一 Supabase 项目 `pinztkcvnaswsiorhaun`，同一用户名映射到同一账户 UID。浏览器登录状态和本机体验数据按网站来源保存，不会自动跨来源迁移。本机体验记录可以在设置中导出，再在另一入口导入。GitHub 入口现在直接提供完整程序，不再跳转到其他网站。
 
-采用邮箱登录链接：首次登录自动创建账户，不在 GitHub Pages 上设置密码输入表单。官方 Supabase 客户端处理 PKCE 和会话刷新。用户在同一设备的同一浏览器中打开邮件链接。
+GitHub 和数据库仍属于海外服务。此部署用于验证国内不使用代理时的实际连通性，尚未完成中国大陆多运营商实测，不能承诺国内网络稳定可用。登录页的“检查连接”分别检测网页、登录、数据和注册接口，不提交账户凭据，不创建账户。所有检查通过只代表接口连通，实际保存仍需登录后确认。
 
-上线前必须在 Supabase 设置：
+## 本地构建与验证
 
-1. Authentication → URL Configuration：把实际网站地址设为 Site URL，并加入 Redirect URLs 白名单。不要保留 localhost 作为正式站点地址。
-2. Authentication → Email / SMTP：配置能发给实际使用者的 SMTP 服务。Supabase 默认发信只支持组织团队成员邮箱，**未配置 SMTP 不能当作多人可用的邮箱登录服务**。不要通过把网站使用者加入数据库管理员组织来绕过这个限制。
-3. `dist/cloud-config.js` 只填写项目 URL、可公开的 publishable key 和可选 redirectUrl。绝不能填写 service_role、数据库密码或 SMTP 授权码。
-4. 使用两个真实测试账户验证登录、写入、退出、重新登录和隔离，再正式交给其他人使用。
+使用 Node.js 24：
 
-## 数据库
-
-可复现迁移位于 `supabase/migrations/202610310001_accounts.sql`。迁移已在用户授权的新免费 Supabase 项目应用。
-
-`public.tally_ledgers` 只允许登录用户读取自己的行。客户端无直接写入权限；只能调用内部使用 `auth.uid()` 的 `tally_save`。它不接受客户端提供的 user_id，并在同一事务内检查版本、保存旧副本和写入新状态。
-
-`tally_private.backups` 不向匿名或登录客户端开放直接访问。恢复函数仅返回调用者自己的版本。
-
-这不是跨平台容灾备份。5 个历史副本仍在同一个数据库，免费套餐也有容量、发信和闲置暂停限制。重要记录应额外导出，不能承诺任何单一服务永不丢失数据。
-
-## 本次验证
-
-执行 `npm test`：16 项账本测试、10 项 PostgreSQL 权限与事务测试、9 项云端客户端测试，共 35 项。PostgreSQL 测试使用 PGlite，显式模拟 `anon` 和 `authenticated` 角色。
-
-此外，已在真实 Supabase 项目中用回滚事务验证：A 账户可以保存并读取自己的账本，B 看不到 A 的记录；测试身份和记录均已回滚，不留在生产数据库。
-
-浏览器端界面和刷新恢复另行检查。真实邮箱登录和多人邮件投递必须在 SMTP、正式域名白名单设置完成后验证，不能用模拟测试代替。
-
-## 发布
-
-仓库含 GitHub Pages 工作流，安装依赖、测试、打包官方 SDK 后发布 `dist/`。GitHub 免费 Pages 需要公开仓库，仅上传代码，不上传个人账本或凭据。
-
-```bash
+```sh
 npm ci
 npm test
 npm run build
+node scripts/github-entry.mjs
 ```
 
-`dist/vendor/supabase.js` 是由官方 npm 包构建的浏览器 SDK，构建后同源提供，无需使用者访问第三方 JavaScript CDN。
+GitHub Actions 构建并发布 `dist-github/`；独立站点发布 `dist/`。Supabase 官方 SDK 打包到本站，页面不依赖第三方字体或脚本 CDN。GitHub 入口声明 CSP，仅允许本站资源和指定 Supabase 接口。
 
-## 安全审查说明
+## 账户与数据隔离
 
-Supabase advisor 会提示 3 个供登录用户调用的 SECURITY DEFINER RPC。它们是本项目有意设计的最小数据库写入／备份边界，均固定空 search_path、内部验证 auth.uid()、不接收目标用户 ID，并已测试跨账户与匿名拒绝；验证辅助函数和备份表不向客户端开放。
+注册接口为 `supabase/functions/tally-accounts/index.ts`，由 `scripts/build-accounts.mjs` 从共享校验和 `src/registration.js` 打包。用户名统一小写，SHA-256 映射到内部 `.invalid` 标识，不代表真实邮箱，不发送确认邮件。密码交由 Supabase Auth 存储散列，前端不保存明文密码。
 
-参考：https://supabase.com/docs/guides/database/database-linter?lint=0029_authenticated_security_definer_function_executable
+注册函数保留网关 JWT 校验，前端提供权限仅为 anon 的公开 JWT 作为网关标识。服务端从环境读取管理密钥，不向浏览器返回。它执行来源白名单、请求大小限制、输入校验和数据库持久限流；限流 RPC 仅 service_role 可调用。`TALLY_ALLOWED_ORIGINS` 可覆盖默认的两个入口 origin。
 
-GitHub Pages 官方不建议处理密码等敏感交易，所以本实现选择托管邮件链接登录，不在网页中收集密码。
+浏览器只保存公开项目配置，绝不能填写管理员密钥、数据库密码或 SMTP 授权码。
 
-https://docs.github.com/en/pages/getting-started-with-github-pages/securing-your-github-pages-site-with-https
-https://supabase.com/docs/guides/auth/auth-smtp
+`public.tally_ledgers` 开启 RLS，只允许读取 `auth.uid()` 所属账本，没有客户端直接写入权限。保存通过 `tally_save`，服务端推导 UID，使用版本比较及 mutation UUID 防止多端覆盖和重试重复记数。私有备份保留最近 5 个历史版本，恢复接口按当前 UID 限定。重要记录仍需定期另行导出。
 
-## 当前上线状态
+客户端先确认云端保存再显示新数量；保存结果不明会冻结编辑，避免重复加减。切换账户和退出时清除旧账户的显示与本机备用副本。退出登录保留云端记录。
 
-网站：https://gupcurie.github.io/little-tally-web/
+## 数据库部署
 
-GitHub Pages 已发布；数据库迁移及账户隔离验证完成。当前使用 Gupcurie 账户下 Little Tally 免费组织的新项目 `pinztkcvnaswsiorhaun`，数据库及 URL 白名单已配置。SMTP 已由项目所有者在后台保存并启用，网站 `cloudConfig.authEnabled` 已设为 `true`。数据库保存和账户隔离已验证；真实邮箱投递、手机登录、再次登录恢复还需要使用者实际完成验证。密码或 SMTP 授权码仅在服务商后台填写。
+按顺序应用 `supabase/migrations/` 的两个 SQL 文件。先检查现有表，避免重复创建。所有私有表同样启用 RLS，客户端没有 schema/table 权限。
 
-## 用户名密码版（2026-10-31）
+安全检查中三个已登录用户可调用的 SECURITY DEFINER 函数是有意设计的账户 API；函数固定 search_path、检查 auth.uid()，权限和跨账户行为经过测试。相关检查说明：https://supabase.com/docs/guides/database/database-linter?lint=0029_authenticated_security_definer_function_executable 。免费项目的泄漏密码保护功能目前未启用。
 
-新版只要求 3–24 位英文字母、数字、下划线用户名和6–128 位密码，允许纯数字、纯字母或其他字符。用户名统一小写；密码由 Supabase Auth 存储其散列，不写入前端缓存。用户名 SHA-256 对应 `.invalid` 内部标识，不代表真实邮箱，不发送确认邮件。注册通过 `tally-accounts` Edge Function 完成，服务密钥只读运行环境；其他读写继续按 `auth.uid()` 隔离。注册端点保留网关 JWT 校验，使用只具有 anon 权限的公开 JWT 作为网关标识；它不代表账户登录。函数内部实施输入校验、源站白名单及数据库持久限流；数据库限流 RPC 仅 service_role 可执行。
+## 迁移与验证范围
 
-需要在函数环境设置 `TALLY_ALLOWED_ORIGINS` 为实际网站 origin。现有邮箱确认和其他账户的认证设置不需要关闭。此版未提供密码找回，使用者需自行保存凭据及定期导出记录。
-
-密码页面部署在独立 HTTPS 站点。GitHub Pages 保留为新版入口和旧本机数据导出入口。
-
-实际用户名密码版：https://little-tally-pocket-455b.sharp-wave-4678.chatgpt.site
-
-2026-10-31 修复浏览器原生 fetch 接收者绑定，覆盖注册、云端读取和保存；密码改为 6–128 位，无字符组合限制。
+原安卓/iOS 账本 JSON 可以导入。实际云端已验证用户名注册、密码登录、再次登录恢复数量、账户隔离、幂等保存、拒绝直接写入和错误密码。模拟浏览器原生 fetch 的接收者检查覆盖注册、读取和保存，避免 Illegal invocation。前端浏览器连通性检查另行验证；中国大陆直连效果必须由实际网络确认。

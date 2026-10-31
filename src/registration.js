@@ -1,7 +1,7 @@
 import {canonicalUsername,checkPassword,sha256,accountAddress} from '../dist/account.js';
 export function makeRegistrationHandler({env,fetcher=fetch}){
  return async function handle(req){
-  const allowed=new Set((env('TALLY_ALLOWED_ORIGINS')||'https://little-tally-pocket-455b.sharp-wave-4678.chatgpt.site').split(',').map(x=>x.trim()).filter(Boolean));
+  const allowed=new Set((env('TALLY_ALLOWED_ORIGINS')||'https://little-tally-pocket-455b.sharp-wave-4678.chatgpt.site,https://gupcurie.github.io').split(',').map(x=>x.trim()).filter(Boolean));
   const origin=req.headers.get('Origin')||'';
   const headers={'Content-Type':'application/json; charset=utf-8','Cache-Control':'no-store','Vary':'Origin','Access-Control-Allow-Headers':'authorization, apikey, content-type','Access-Control-Allow-Methods':'POST, OPTIONS'};
   if(allowed.has(origin))headers['Access-Control-Allow-Origin']=origin;
