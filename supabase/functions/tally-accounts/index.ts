@@ -6,7 +6,7 @@ function canonicalUsername(value) {
   return name;
 }
 function checkPassword(value) {
-  if (typeof value !== "string" || value.length < 10 || value.length > 128 || !/[A-Za-z]/.test(value) || !/[0-9]/.test(value)) throw new Error("\u5BC6\u7801\u9700 10\u2013128 \u4F4D\uFF0C\u5E76\u540C\u65F6\u5305\u542B\u5B57\u6BCD\u548C\u6570\u5B57\u3002");
+  if (typeof value !== "string" || value.length < 6 || value.length > 128) throw new Error("\u5BC6\u7801\u9700 6\u2013128 \u4F4D\uFF0C\u53EF\u4EE5\u4F7F\u7528\u6570\u5B57\u3001\u5B57\u6BCD\u6216\u5176\u4ED6\u5B57\u7B26\u3002");
   return value;
 }
 async function sha256(value) {

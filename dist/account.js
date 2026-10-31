@@ -5,7 +5,7 @@ export function canonicalUsername(value){
  return name;
 }
 export function checkPassword(value){
- if(typeof value!=='string'||value.length<10||value.length>128||!/[A-Za-z]/.test(value)||!/[0-9]/.test(value))throw new Error('密码需 10–128 位，并同时包含字母和数字。');
+ if(typeof value!=='string'||value.length<6||value.length>128)throw new Error('密码需 6–128 位，可以使用数字、字母或其他字符。');
  return value;
 }
 export async function sha256(value){return [...new Uint8Array(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(value)))].map(x=>x.toString(16).padStart(2,'0')).join('');}

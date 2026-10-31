@@ -3,7 +3,7 @@ import {initialState,validateState,clone,uid} from './core.js';
 import {BrowserLedger} from './storage.js';
 
 export class CloudLedger {
- constructor(config,{createClient,fetcher=globalThis.fetch,cacheFactory=scope=>new BrowserLedger({scope})}={}){
+ constructor(config,{createClient,fetcher=globalThis.fetch.bind(globalThis),cacheFactory=scope=>new BrowserLedger({scope})}={}){
   this.config=config;this.createClient=createClient;this.fetcher=fetcher;this.cacheFactory=cacheFactory;
   this.state=initialState();this.user=null;this.signedIn=false;this.requiresAuth=true;this.configured=Boolean(config.authEnabled!==false&&config.url&&config.publishableKey);
   this.readOnly=true;this.error=null;this.loading=false;this.saving=false;this.savedAt=null;this.cloudRevision=null;this.cache=null;this.cacheWarning=null;this.epoch=0;this.recoverable=null;this.protection=false;this.onchange=()=>{};this.channel=null;this._accountTask=Promise.resolve();
