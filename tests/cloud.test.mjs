@@ -18,6 +18,17 @@ function fixture(){
  return {sessions,setSession:s=>{session=s;},rows,requests,caches,auth,createClient,cacheFactory,fetcher,make(extra={}){return new CloudLedger({url:'https://backend.example.invalid',publishableKey:'public-test-key'},{createClient,fetcher,cacheFactory,...extra});}};
 }
 test('cloud acknowledgement persists records across a fresh login',async()=>{const f=fixture(),a=f.make();await a.init();const id=a.state.sales.items[0].id;await a.commit(s=>C.change(s.sales,id,1));const b=f.make();await b.init();assert.equal(C.counts(b.state.sales)[id],1);assert.equal(b.cloudRevision,1);a.channel?.close();b.channel?.close();});
+test('saved egg recommendation shares the exact sequence through cloud reload and advances atomically with a placement',async()=>{
+ const f=fixture(),a=f.make();await a.init();
+ await a.commit(s=>{const egg=C.ensureEgg(s);C.eggAddItem(egg,'甲',8);C.eggAddItem(egg,'乙',3);egg.recommendation=C.eggCreatePlan(egg);});
+ const original=[...C.eggSavedSequence(a.state.egg.recommendation)],b=f.make();await b.init();
+ assert.deepEqual([...C.eggSavedSequence(b.state.egg.recommendation)],original);
+ const beforeRecords=a.state.egg.records.length;
+ await a.commit(s=>{const egg=s.egg,previous=egg.recommendation;C.eggChange(egg,original[0],1);egg.recommendation=C.eggAdvancePlan(egg,previous,original[0]);});
+ await b.reload();assert.equal(b.state.egg.records.length,beforeRecords+1);
+ assert.ok(C.eggStoredPlan(b.state.egg));assert.deepEqual([...C.eggSavedSequence(b.state.egg.recommendation)],original.slice(1));
+ assert.equal(C.total(b.state.sales),0);a.channel?.close();b.channel?.close();
+});
 test('changing account clears the previous rendered ledger and local cache',async()=>{const f=fixture(),a=f.make();await a.init();await a.commit(s=>C.setCount(s.sales,s.sales.items[0].id,12));f.setSession(f.sessions.B);await a.setSession(f.sessions.B);assert.equal(a.user.id,'account-b');assert.equal(C.total(a.state.sales),0);assert.equal(f.caches[0].cleared,true);await a.commit(s=>C.setCount(s.sales,s.sales.items[0].id,7));assert.equal(C.total(f.rows.get('account-a').payload.sales),12);assert.equal(C.total(f.rows.get('account-b').payload.sales),7);a.channel?.close();});
 test('logout retains cloud data while erasing the current local account view',async()=>{const f=fixture(),a=f.make();await a.init();await a.commit(s=>C.change(s.sales,s.sales.items[0].id,1));await a.logout();assert.equal(a.signedIn,false);assert.equal(a.user,null);assert.equal(C.total(a.state.sales),0);assert.equal(f.caches[0].cleared,true);assert.equal(C.total(f.rows.get('account-a').payload.sales),1);a.channel?.close();});
 test('late cloud response from A cannot be written to or displayed as B',async()=>{const f=fixture();let release,started;const waiting=new Promise(r=>started=r),gate=new Promise(r=>release=r);let writes=0;const a=f.make({fetcher:async(url,options)=>{if(url.endsWith('rpc/tally_save')&&++writes===1){started();await gate;}return f.fetcher(url,options);}});await a.init();const promise=a.commit(s=>C.setCount(s.sales,s.sales.items[0].id,55));await waiting;f.setSession(f.sessions.B);await a.setSession(f.sessions.B);release();await assert.rejects(promise);assert.equal(a.user.id,'account-b');assert.equal(C.total(a.state.sales),0);assert.equal(f.rows.has('account-b'),false);a.channel?.close();});

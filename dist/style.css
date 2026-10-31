@@ -102,3 +102,23 @@ body.count-screen,body.egg-screen{height:100dvh;overflow:hidden}
 .egg-stat-name{padding:0;background:none;font-size:13px;font-weight:600;color:var(--ink);text-align:left;min-height:28px}.egg-stat-detail{font-size:11px;line-height:1.8;color:var(--muted);margin-top:4px;overflow-wrap:anywhere}.egg-stat-item .rank-track{margin-top:7px}
 .egg-more-records{width:100%;margin-top:15px}
 @media(prefers-reduced-motion:reduce){.egg-reco.reco-updated,.egg-reco.reco-updated:after{animation:none!important}}
+
+/* Current recommendation mirrors the last-placement outline in green. */
+.egg-card.recommended{border-color:#298b5d;background:#eefaf3;box-shadow:inset 0 0 0 1px #298b5d}
+.egg-card.flash.recommended{background:#fff0f3;box-shadow:inset 0 0 0 1px #298b5d,inset 0 0 0 3px #df8296}
+button.egg-reco-main{align-self:stretch;text-align:left;background:transparent;color:inherit;padding:0;cursor:pointer;border-radius:9px;min-height:36px}
+.egg-reco-main>.icon{flex:none;width:13px;height:13px;opacity:.7}
+.egg-reco-main:focus-visible{outline:2px solid #fff;outline-offset:3px}
+.egg-plan-heading{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;font-size:12px}
+.egg-plan-heading .small-button{color:#267b53;background:#e8f6ee;min-height:42px}
+.egg-plan-list{padding:0;margin:16px 0 0;list-style:none;border:1px solid var(--line);border-radius:15px;overflow:hidden}
+.egg-plan-list li{display:flex;align-items:center;gap:16px;padding:13px 16px;border-bottom:1px solid var(--line);font-size:14px}
+.egg-plan-list li:last-child{border-bottom:0}
+.egg-plan-list li>span{width:66px;flex:none;color:var(--muted);font-size:12px;font-variant-numeric:tabular-nums}
+.egg-plan-list li>strong{min-width:0;overflow-wrap:anywhere}
+.egg-plan-list li.next{background:#eefaf3;color:#267b53}
+.egg-plan-list li.next>span{color:#267b53;font-weight:600}
+.egg-plan-end{text-align:center;color:var(--muted);font-size:12px;margin:20px 0 0}
+.egg-plan-more{width:100%;margin-top:14px}
+
+.egg-plan-sync{font-size:11px;color:#298b5d;margin:0 0 12px}

@@ -17,6 +17,7 @@ const main=document.querySelector('#main'),nav=document.querySelector('.bottom-n
 const localMode=new URLSearchParams(location.search).get('local')==='1';
 const ledger=localMode?new BrowserLedger():new CloudLedger(cloudConfig);
 let state={page:['count','egg','history','stats','ratio','settings'].includes(location.hash.slice(1))?location.hash.slice(1):'egg',book:'sales',range:0,keyword:'',direction:0,historyLimit:80,selection:new Set(),selecting:false,itemID:null,ratioMode:'parts',ratioSelected:new Set(),ratioValues:Object.create(null),ratioPlan:null,ratioError:null,authMode:'login',baseID:'',selectedHour:null};
+let eggPlanSyncTimer,eggPlanSyncTask=null;
 let toastTimer,formSubmit=null,restoreExpected=null,backupReady=null;
 icons.egg='<path d="M12 3c3.6 0 6.5 4.4 6.5 9.2 0 4.4-2.9 8.3-6.5 8.3S5.5 16.6 5.5 12.2C5.5 7.4 8.4 3 12 3z"/><path d="M9.5 9.5c.6-1.2 1.5-2 2.5-2"/>';
 const TAB_LABELS={count:'记数',egg:'放蛋',history:'历史',stats:'统计',ratio:'比例',settings:'设置'};
@@ -27,7 +28,7 @@ const loadEggMode=()=>{try{const raw=localStorage.getItem('little-tally-egg-mode
 const saveEggMode=value=>{try{localStorage.setItem('little-tally-egg-mode',value?'1':'0');}catch{}};
 const loadBooks=()=>{try{const raw=JSON.parse(localStorage.getItem('little-tally-books')||'null');if(raw&&typeof raw==='object')return {sales:raw.sales!==false,stock:raw.stock!==false,egg:raw.egg!==false};}catch{}return {sales:true,stock:true,egg:true};};
 const saveBooks=books=>{try{localStorage.setItem('little-tally-books',JSON.stringify(books));}catch{}};
-Object.assign(state,{eggPick:null,eggMotionKey:null,eggStatsLimit:80,eggOnlyLeft:false,eggItemID:null,eggSelecting:false,eggSelection:new Set(),eggArrange:false,eggDraft:null,eggCols:2,tabDrag:null,books:loadBooks(),statsGran:'hour',statsItem:null});
+Object.assign(state,{eggPick:null,eggPlan:null,eggMotionKey:null,eggStatsLimit:80,eggOnlyLeft:false,eggItemID:null,eggSelecting:false,eggSelection:new Set(),eggArrange:false,eggDraft:null,eggCols:2,tabDrag:null,books:loadBooks(),statsGran:'hour',statsItem:null});
 const enabledBooks=()=>['sales','stock','egg'].filter(k=>state.books[k]);
 const eggMode=()=>enabledBooks().length===1&&state.books.egg;
 let TABS=loadTabs();
@@ -49,7 +50,7 @@ function render(){
   try{main.innerHTML=({count:countView,egg:eggView,history:historyView,stats:statsViewNew,ratio:ratioView,settings:settingsView}[state.page]||countView)();}
   catch(err){state.eggItemID=null;state.page='count';main.innerHTML=countView();toast('这个页面刚刚没打开，已回到记数页。');}
  }
- layoutVars();fitItemGrid();fitEggGrid();animateEggRecommendation();
+ layoutVars();fitItemGrid();fitEggGrid();animateEggRecommendation();refreshEggPlan();queueEggPlanSync();
 }
 function animateEggRecommendation(){
  const box=main.querySelector('.egg-reco');
@@ -244,7 +245,7 @@ function eggCard(p,egg){
  const flash=C.eggLastPlaced(egg)===p.id;
  const pct=p.target?Math.min(100,Math.round(p.itemProgress/p.target*100)):0;
  const item=egg.items.find(i=>i.id===p.id)||{};
- return `<article class="egg-card${flash?' flash':''}" data-egg="${e(p.id)}">
+ return `<article class="egg-card${flash?' flash':''}${state.eggPick?.id===p.id?' recommended':''}" data-egg="${e(p.id)}">
   <button class="egg-open" data-action="egg-detail" data-id="${e(p.id)}" aria-label="查看${e(p.name)}的记录">
    <span class="egg-head"><span class="egg-name">${e(p.name)}</span></span>
    <strong class="egg-count${p.target>=10000?' wide':''}" title="第 ${p.itemRound} 轮 ${p.itemProgress}/${p.target}，累计 ${p.count} 个"><span class="egg-current">${p.itemProgress}</span><small class="egg-denominator">/${p.target}</small></strong>
@@ -266,18 +267,72 @@ function eggPickKey(egg){
  return JSON.stringify([egg.items.map(i=>[i.id,i.ratio,counts[i.id]]),egg.records.slice(-16).map(r=>r.id)]);
 }
 function eggPickId(egg){
- const key=eggPickKey(egg);
- if(state.eggPick?.key===key&&egg.items.some(i=>i.id===state.eggPick.id))return state.eggPick.id;
- const picks=C.eggRecommendationSet(egg,egg.items.length).map(p=>p.id);
- state.eggPick=picks.length?{key,id:picks[0],picks,alternative:false}:null;
+ const key=eggPickKey(egg),storedMark=JSON.stringify(egg.recommendation||null);
+ if(state.eggPick?.key===key&&state.eggPick.storedMark===storedMark&&egg.items.some(i=>i.id===state.eggPick.id))return state.eggPick.id;
+ const saved=C.eggStoredPlan(egg),picks=C.eggRecommendationSet(egg,egg.items.length).map(p=>p.id);
+ const id=saved?C.eggSavedSequence(saved).next().value:picks[0];
+ state.eggPick=id?{key,id,picks:[id,...picks.filter(p=>p!==id)],alternative:false,storedMark,snapshot:saved||C.eggCreatePlan(egg,{firstId:id})}:null;
  return state.eggPick?.id||null;
 }
 function eggReroll(egg){
  const current=eggPickId(egg),picks=state.eggPick?.picks||[];
  if(picks.length<2)return false;
  const next=picks[(picks.indexOf(current)+1)%picks.length];
- state.eggPick.id=next;state.eggPick.alternative=next!==picks[0];
+ state.eggPick.id=next;state.eggPick.alternative=next!==picks[0];state.eggPick.snapshot=C.eggCreatePlan(egg,{firstId:next});state.eggPlan=null;
  return true;
+}
+function eggPlanKey(egg){const id=eggPickId(egg);return JSON.stringify([eggPickKey(egg),id,state.eggPick?.snapshot?.seed,state.eggPick?.snapshot?.offset]);}
+function eggPlan(egg){
+ const key=eggPlanKey(egg);
+ if(state.eggPlan?.key===key)return state.eggPlan;
+ const snapshot=state.eggPick?.snapshot||C.eggCreatePlan(egg,{firstId:state.eggPick?.id||null});
+ if(state.eggPick)state.eggPick.snapshot=snapshot;
+ const plan={key,snapshot,round:snapshot.context.round+1,total:snapshot.total,ids:[],iterator:C.eggSavedSequence(snapshot)};
+ state.eggPlan=plan;extendEggPlan(plan);return plan;
+}
+function extendEggPlan(plan){
+ const end=Math.min(plan.total,plan.ids.length+200);
+ while(plan.ids.length<end){const next=plan.iterator.next();if(next.done)break;plan.ids.push(next.value);}
+}
+function regenerateEggPlan(egg){
+ const picks=C.eggRecommendationSet(egg,egg.items.length).map(p=>p.id);
+ state.eggPick=picks.length?{key:eggPickKey(egg),id:picks[0],picks,alternative:false,storedMark:JSON.stringify(egg.recommendation||null),snapshot:C.eggCreatePlan(egg,{firstId:picks[0]})}:null;
+ state.eggPlan=null;return eggPlan(egg);
+}
+function advanceEggPlan(egg,plan,placedId){
+ const last=egg.records.at(-1);
+ if(!plan||plan.total<=1||plan.ids[0]!==placedId||last?.itemId!==placedId||last.kind!=='count'||last.delta!==1)return false;
+ const prior={...egg,records:egg.records.slice(0,-1)};
+ if(plan.snapshot.key!==eggPickKey(prior))return false;
+ const snapshot=C.eggAdvancePlan(egg,plan.snapshot,placedId);if(!snapshot)return false;
+ plan.snapshot=snapshot;plan.ids.shift();plan.total--;
+ if(!plan.ids.length)extendEggPlan(plan);
+ const picks=C.eggRecommendationSet(egg,egg.items.length).map(p=>p.id),next=plan.ids[0];
+ state.eggPick={key:eggPickKey(egg),id:next,picks:[next,...picks.filter(id=>id!==next)],alternative:false,storedMark:JSON.stringify(egg.recommendation||null),snapshot};
+ plan.key=eggPlanKey(egg);state.eggPlan=plan;return true;
+}
+function showEggPlan(){
+ const egg=eggBook(),plan=eggPlan(egg),names=Object.fromEntries(egg.items.map(i=>[i.id,i.name]));
+ showSheet('本轮推荐顺序',`<section data-egg-plan><p class="egg-plan-sync" data-egg-plan-sync>${eggPlanStatus()}</p><div class="egg-plan-heading"><span>第 ${plan.round} 轮 · 还需 ${fmt(plan.total)} 个</span><button type="button" class="small-button" data-action="egg-plan-refresh">重新生成本轮顺序</button></div><p class="hint">按顺序放入会推进到下一件；放了别的物品、减回或改数后会重新计算。</p><ol class="egg-plan-list">${plan.ids.map((id,i)=>`<li${i===0?' class="next"':''}><span>${i===0?'下一个':'第 '+(i+1)+' 个'}</span><strong>${e(names[id]||'物品')}</strong></li>`).join('')}</ol>${plan.ids.length<plan.total?`<button type="button" class="secondary-button egg-plan-more" data-action="egg-plan-more">继续显示（还有 ${fmt(plan.total-plan.ids.length)} 个）</button>`:'<p class="egg-plan-end">本轮结束</p>'}</section>`);
+}
+function refreshEggPlan(){
+ if(sheet.open&&sheetContent.querySelector('[data-egg-plan]')){if(state.eggPlan?.key!==eggPlanKey(eggBook()))showEggPlan();const status=sheetContent.querySelector('[data-egg-plan-sync]');if(status)status.textContent=eggPlanStatus();}
+}
+function eggPlanStatus(){
+ if(typeof localMode!=='undefined'&&localMode)return '本机预览';
+ return JSON.stringify(eggBook().recommendation)===JSON.stringify(state.eggPlan?.snapshot)?'已同步后台':'待同步后台';
+}
+function queueEggPlanSync(){
+ if(localMode||!ledger.signedIn||ledger.loading||ledger.readOnly||!eggBook().items.length)return;
+ const plan=eggPlan(eggBook());
+ if(JSON.stringify(eggBook().recommendation)===JSON.stringify(plan.snapshot))return;
+ clearTimeout(eggPlanSyncTimer);
+ eggPlanSyncTimer=setTimeout(()=>{
+  if(ledger.saving||eggPlanSyncTask){queueEggPlanSync();return;}
+  const egg=eggBook(),current=eggPlan(egg),key=eggPickKey(egg),snapshot=C.clone(current.snapshot);
+  eggPlanSyncTask=ledger.commit(s=>{const target=C.ensureEgg(s);if(eggPickKey(target)!==key)throw new Error('数量已变化，请重试推荐同步。');target.recommendation=snapshot;});
+  eggPlanSyncTask.catch(()=>toast('推荐顺序尚未同步后台，请检查网络后重新同步。')).finally(()=>{eggPlanSyncTask=null;refreshEggPlan();});
+ },200);
 }
 function eggView(){
  const egg=eggBook();
@@ -289,7 +344,7 @@ function eggView(){
  const pickId=eggPickId(egg),pick=pickId?byId[pickId]:null,round=C.eggRound(egg)+1;
  return `<section class="egg-wrap">
   <div class="egg-statusbar"><img class="egg-mark" src="./icon-192.png" alt="火星演唱会标志"><div class="egg-status"><span data-testid="egg-round">第 <strong>${round}</strong> 轮</span><span data-testid="egg-total">总数 <strong>${fmt(C.eggTotal(egg))}</strong> 个</span>${off?'<span class="preview-label">预览下一轮</span>':''}</div><button class="small-button egg-tools" data-action="${state.eggArrange?'egg-arrange':'egg-tools'}">${state.eggArrange?'完成':icon('settings')+'操作'}</button></div>
-  <div class="egg-reco"><div class="egg-reco-main"><span class="eyebrow">${state.eggPick?.alternative?'备选':'推荐'}</span><strong>${pick?e(pick.name):'—'}</strong></div><div class="egg-reco-actions">${pick?`<button class="egg-add-main" data-action="egg-add" data-id="${e(pick.id)}">+1</button>`:''}<button class="ghost small" data-action="egg-reroll">换一个</button></div></div>
+  <div class="egg-reco"><button class="egg-reco-main" data-action="egg-plan" aria-label="查看本轮推荐顺序"><span class="eyebrow">${state.eggPick?.alternative?'备选':'推荐'}</span><strong>${pick?e(pick.name):'—'}</strong>${icon('arrow','tiny')}</button><div class="egg-reco-actions">${pick?`<button class="egg-add-main" data-action="egg-add" data-id="${e(pick.id)}">+1</button>`:''}<button class="ghost small" data-action="egg-reroll">换一个</button></div></div>
   <div class="egg-grid" data-columns="${state.eggCols}">${shown.length?shown.map(id=>eggCard(byId[id],egg)).join(''):`<p class="egg-none">没有未放满的物品。<button class="small-button" data-action="egg-only">显示全部</button></p>`}</div>
  </section>`;
 }
@@ -336,7 +391,12 @@ function fitEggGrid(){
 function eggTick(){
  for(const node of main.querySelectorAll('[data-timer]')){node.textContent=(node.dataset.timerPrefix||'')+sinceText(Number(node.dataset.at)||C.eggLastChange(eggBook(),node.dataset.timer));}
 }
-async function mutateEgg(fn){await ledger.commit(s=>fn(C.ensureEgg(s)));state.eggDraft=null;state.eggPick=null;render();}
+async function mutateEgg(fn,{placedId=null}={}){
+ clearTimeout(eggPlanSyncTimer);if(eggPlanSyncTask)await eggPlanSyncTask.catch(()=>{});
+ const plan=state.eggPlan;
+ await ledger.commit(s=>{const egg=C.ensureEgg(s),previous=plan?.snapshot||C.eggStoredPlan(egg);fn(egg);egg.recommendation=(placedId&&C.eggAdvancePlan(egg,previous,placedId))||C.eggCreatePlan(egg);});
+ state.eggDraft=null;if(!placedId||!advanceEggPlan(eggBook(),plan,placedId)){state.eggPick=null;state.eggPlan=null;}render();
+}
 async function compressImage(file){
  const url=URL.createObjectURL(file);
  try{
@@ -363,7 +423,7 @@ function showSheet(title,body,submit=null,button='保存'){formSubmit=submit;she
 function closeSheet(){sheet.close();formSubmit=null;}
 function confirmSheet(title,text,callback,button='确认'){showSheet(title,`<p>${e(text)}</p>`,async()=>{await callback();return true;},button);}
 function itemInput(id){const i=book().items.find(i=>i.id===id);if(!i)return;showSheet(`修改 ${i.name}`,`<p>输入新的累计数量，差额会保存为一条记录。</p><label class="field-label" for="amount">新的累计数量</label><input class="field-input" id="amount" name="amount" inputmode="numeric" value="${C.counts(book())[id]}">`,async fd=>{const n=C.numberInput(String(fd.get('amount')));await mutate(b=>C.setCount(b,id,n));return true;});}
-async function mutate(fn,kind=state.book){await ledger.commit(s=>fn(s[kind]));state.ratioPlan=null;render();}
+async function mutate(fn,kind=state.book){clearTimeout(eggPlanSyncTimer);if(eggPlanSyncTask)await eggPlanSyncTask.catch(()=>{});await ledger.commit(s=>fn(s[kind]));state.ratioPlan=null;render();}
 function loadRatio(){const g=book().goal;state.ratioMode=g?.mode||'parts';state.ratioSelected=new Set(Object.keys(g?.values||{}));state.ratioValues=Object.assign(Object.create(null),g?.values||{});state.ratioPlan=null;state.ratioError=null;state.baseID='';}
 function draftGoal(){return {mode:state.ratioMode,values:Object.fromEntries([...state.ratioSelected].map(id=>[id,state.ratioValues[id]??'']))};}
 async function saveDownload(content,name){const blob=new Blob([content],{type:'application/json'}),file=new File([blob],name,{type:'application/json'});if(navigator.canShare?.({files:[file]})){await navigator.share({files:[file],title:'拆弹专家备份'});return;}const url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download=name;document.body.append(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),60000);}
@@ -385,7 +445,7 @@ async function action(a,node){
  if(a==='detail'){state.itemID=id;render();window.scrollTo({top:0});return;}
  if(a==='detail-back'){state.itemID=null;render();return;}
  if(a==='egg-tools'){showSheet('放蛋操作',`<button class="list-button" type="button" data-action="egg-add-item">${icon('plus')}<span>添加物品</span>${icon('arrow','chevron')}</button><button class="list-button" type="button" data-action="page" data-page="ratio" data-book="egg">${icon('ratio')}<span>设置比例</span>${icon('arrow','chevron')}</button><button class="list-button" type="button" data-action="egg-arrange">${icon('count')}<span>排列卡片</span>${icon('arrow','chevron')}</button><button class="list-button" type="button" data-action="egg-only">${icon('target')}<span>${state.eggOnlyLeft?'显示全部物品':'只看本轮还缺的'}</span>${icon('arrow','chevron')}</button><button class="list-button" type="button" data-action="egg-next-round">${icon('history')}<span>${state.eggRoundView?'回到本轮':'预览下一轮'}</span>${icon('arrow','chevron')}</button>`);return;}
- if(a==='egg-add'){const id=node.dataset.id;await mutateEgg(egg=>C.eggChange(egg,id,1));return;}
+ if(a==='egg-add'){const id=node.dataset.id;await mutateEgg(egg=>C.eggChange(egg,id,1),{placedId:id});return;}
  if(a==='egg-minus'){const id=node.dataset.id;try{await mutateEgg(egg=>C.eggChange(egg,id,-1));}catch(err){toast(err.message);}return;}
  if(a==='egg-next-round'){state.eggRoundView=state.eggRoundView?0:1;render();return;}
  if(a==='egg-rename'){const item=eggBook().items.find(i=>i.id===id);if(!item)return;showSheet('修改名字',`<label class="field-label" for="name">物品名称</label><input class="field-input" id="name" name="name" maxlength="40" value="${e(item.name)}">`,async fd=>{await mutateEgg(egg=>C.eggRename(egg,id,String(fd.get('name')||'')));return true;});return;}
@@ -396,6 +456,9 @@ async function action(a,node){
  if(a==='egg-mode'){state.books={sales:state.books.sales,stock:state.books.stock,egg:!state.books.egg};saveBooks(state.books);render();return;}
  if(a==='book-toggle'){const k=node.dataset.book,next={...state.books,[k]:!state.books[k]};if(!next.sales&&!next.stock&&!next.egg){toast('至少要留一个功能。');return;}state.books=next;saveBooks(next);if(!enabledBooks().includes(state.book))state.book=enabledBooks()[0];if(!next.egg&&state.page==='egg'){state.page='count';state.eggItemID=null;history.replaceState(null,'','#count');}if(!next.sales&&!next.stock&&state.page==='count'){state.page='egg';history.replaceState(null,'','#egg');}render();return;}
  if(a==='tab-up'||a==='tab-down'){const p=node.dataset.page,i=TABS.indexOf(p),j=a==='tab-up'?i-1:i+1;if(i<0||j<0||j>=TABS.length){return;}[TABS[i],TABS[j]]=[TABS[j],TABS[i]];saveTabs(TABS);render();return;}
+ if(a==='egg-plan'){showEggPlan();return;}
+ if(a==='egg-plan-refresh'){regenerateEggPlan(eggBook());render();showEggPlan();return;}
+ if(a==='egg-plan-more'){extendEggPlan(eggPlan(eggBook()));showEggPlan();return;}
  if(a==='egg-reroll'){if(!eggReroll(eggBook()))toast('本轮只剩这一项需要放。');render();return;}
  if(a==='egg-only'){state.eggOnlyLeft=!state.eggOnlyLeft;render();return;}
  if(a==='egg-arrange'){state.eggArrange=!state.eggArrange;render();return;}
@@ -488,7 +551,7 @@ window.addEventListener('hashchange',()=>{const p=location.hash.slice(1);if(['co
 window.addEventListener('pageshow',()=>{if(ledger.db&&!ledger.saving)ledger.reload().then(render).catch(()=>{});});
 document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible'&&ledger.db&&!ledger.saving)ledger.reload().then(render).catch(()=>{});});
 if(localMode&&ledger.channel)ledger.channel.onmessage=()=>{if(!ledger.saving)ledger.reload().then(()=>{render();toast('已同步本机另一页面的最新记录。');}).catch(()=>{});};
-ledger.onchange=()=>{if(!localMode&&!ledger.signedIn){if(sheet.open)closeSheet();state.itemID=null;state.selection.clear();state.ratioValues=Object.create(null);state.ratioSelected.clear();state.ratioPlan=null;}render();};
+ledger.onchange=()=>{if(!localMode&&!ledger.signedIn){clearTimeout(eggPlanSyncTimer);state.eggPick=null;state.eggPlan=null;if(sheet.open)closeSheet();state.itemID=null;state.selection.clear();state.ratioValues=Object.create(null);state.ratioSelected.clear();state.ratioPlan=null;}render();};
 await ledger.init();render();
 if('serviceWorker'in navigator)navigator.serviceWorker.register('./sw.js').catch(()=>{});
 setInterval(()=>{if(document.visibilityState==='visible'&&!sheet.open&&['count','stats'].includes(state.page))render();},30000);

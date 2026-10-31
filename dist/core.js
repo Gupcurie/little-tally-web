@@ -1,3 +1,4 @@
+import {planSeed,planRandom} from './plan-random.js';
 export const MAX = 999999999;
 export const ZONE = 'Asia/Shanghai';
 export const uid = () => {
@@ -205,15 +206,11 @@ export function eggDeleteItem(egg,id){
  if(egg.goal&&Object.keys(egg.goal.values||{}).includes(id))egg.goal=null;
 }
 // 从实际数量重新排：本轮配额是硬限制，间隔、避免连出/ABAB 和随机性决定顺序。
-// 不保存预排队列；用户拿了别的、减数或改比例后，都直接按新状态计算。
+// 单步推荐和整轮预览共用同一套配额、间隔与随机评分。
 function eggRandom(){const value=new Uint32Array(1);globalThis.crypto.getRandomValues(value);return value[0]/4294967296;}
-export function eggRecommendationSet(egg,count=4,random=eggRandom){
- const items=egg.items.filter(i=>Number(i.ratio)>0);
- if(!items.length)return [];
- const c=eggCounts(egg),round=Math.min(...items.map(i=>Math.floor(c[i.id]/i.ratio)));
- const progress=items.map(i=>({...i,progress:Math.min(i.ratio,c[i.id]-round*i.ratio)}));
- const totalRatio=sum(items.map(i=>i.ratio)),placed=sum(progress.map(i=>i.progress));
- const eligible=progress.filter(i=>i.progress<i.ratio).map(i=>({...i,left:i.ratio-i.progress}));
+function eggRecommendationContext(egg){
+ const items=egg.items.filter(i=>Number(i.ratio)>0).map(i=>({id:i.id,name:i.name,ratio:i.ratio}));
+ const c=eggCounts(egg),round=items.length?Math.min(...items.map(i=>Math.floor(c[i.id]/i.ratio))):0;
  const gaps=new Map(),recent=[];let distance=0;
  for(let k=egg.records.length-1;k>=0;k--){
   const r=egg.records[k];if(r.delta<=0||r.kind!=='count')continue;
@@ -222,6 +219,17 @@ export function eggRecommendationSet(egg,count=4,random=eggRandom){
   distance+=r.delta;
   if(gaps.size===items.length&&recent.length===3)break;
  }
+ return {items,c,round,gaps,recent};
+}
+export function eggRecommendationSet(egg,count=4,random=eggRandom){
+ return eggRecommendationChoices(eggRecommendationContext(egg),count,random);
+}
+function eggRecommendationChoices({items,c,round,gaps,recent},count,random){
+ if(!items.length)return [];
+ const progress=items.map(i=>({...i,progress:Math.min(i.ratio,c[i.id]-round*i.ratio)}));
+ const totalRatio=sum(items.map(i=>i.ratio)),placed=sum(progress.map(i=>i.progress));
+ const eligible=progress.filter(i=>i.progress<i.ratio).map(i=>({...i,left:i.ratio-i.progress}));
+ if(!eligible.length)return [];
  const slots=sum(eligible.map(i=>i.left));
  // 如果还能无连出地放完，就保留这种可能，避免随机消耗配额后尾部只能连放。
  const feasible=eligible.filter(i=>i.id!==recent[0]&&eligible.every(j=>{
@@ -267,6 +275,63 @@ export function eggRecommendationSet(egg,count=4,random=eggRandom){
   .sort((a,b)=>Number(b.preferred)-Number(a.preferred)||b.score-a.score).slice(0,Math.max(0,count));
 }
 export function eggRecommend(egg,{random=eggRandom}={}){return eggRecommendationSet(egg,1,random)[0]||null;}
+// Lazy, read-only preview. Simulated placements update the same history model,
+// and the fixed starting round prevents the last pick from opening another round.
+export function* eggRoundSequence(egg,{random=eggRandom,firstId=null}={}){
+ yield* eggContextSequence(eggRecommendationContext(egg),random,firstId);
+}
+function* eggContextSequence(context,random,firstId){
+ const {items,c,round,gaps,recent}=context;
+ let first=items.find(i=>i.id===firstId&&c[i.id]<(round+1)*i.ratio);
+ while(true){
+  const pick=first||eggRecommendationChoices(context,1,random)[0];first=null;
+  if(!pick)return;
+  c[pick.id]++;
+  for(const [id,gap] of gaps)gaps.set(id,gap+1);
+  gaps.set(pick.id,1);recent.unshift(pick.id);recent.length=Math.min(3,recent.length);
+  yield pick.id;
+ }
+}
+export function eggRecommendationKey(egg){
+ const counts=eggCounts(egg);
+ return JSON.stringify([egg.items.map(i=>[i.id,i.ratio,counts[i.id]]),egg.records.slice(-16).map(r=>r.id)]);
+}
+const packEggContext=context=>({...context,gaps:[...context.gaps]});
+const unpackEggContext=value=>({...clone(value),gaps:new Map(value.gaps)});
+export function eggCreatePlan(egg,{firstId=null}={}){
+ const context=eggRecommendationContext(egg);
+ return {version:1,key:eggRecommendationKey(egg),context:packEggContext(context),seed:planSeed(),offset:0,firstId,
+  total:sum(context.items.map(i=>Math.max(0,(context.round+1)*i.ratio-context.c[i.id]))),at:Date.now()};
+}
+export function eggStoredPlan(egg){
+ const p=egg.recommendation;
+ try{
+  if(!p||p.version!==1||p.key!==eggRecommendationKey(egg)||!Number.isSafeInteger(p.total)||p.total<1||p.total>200000000)return null;
+  if(!Number.isSafeInteger(p.offset)||p.offset<0||p.offset>200000000000||!validTime(p.at))return null;
+  planRandom(p.seed,p.offset);
+  const c=p.context,ids=new Set(egg.items.map(i=>i.id));
+  if(!c||!Array.isArray(c.items)||c.items.length!==egg.items.length||!Number.isSafeInteger(c.round)||c.round<0||c.round>MAX)return null;
+  if(!c.items.every((i,k)=>i.id===egg.items[k].id&&i.ratio===egg.items[k].ratio&&Number.isSafeInteger(c.c[i.id])&&c.c[i.id]>=0&&c.c[i.id]<=MAX))return null;
+  if(!Array.isArray(c.gaps)||c.gaps.length>200||!c.gaps.every(([id,n])=>ids.has(id)&&Number.isSafeInteger(n)&&n>=1))return null;
+  if(!Array.isArray(c.recent)||c.recent.length>3||!c.recent.every(id=>ids.has(id))||(p.firstId!==null&&!ids.has(p.firstId)))return null;
+  const counts=eggCounts(egg);
+  if(!c.items.every(i=>counts[i.id]===c.c[i.id]))return null;
+  if(p.total!==sum(c.items.map(i=>Math.max(0,(c.round+1)*i.ratio-c.c[i.id]))))return null;
+  return p;
+ }catch{return null;}
+}
+export function* eggSavedSequence(plan){
+ yield* eggContextSequence(unpackEggContext(plan.context),planRandom(plan.seed,plan.offset),plan.firstId);
+}
+export function eggAdvancePlan(egg,plan,placedId){
+ const last=egg.records.at(-1);
+ if(!plan||plan.total<=1||last?.kind!=='count'||last.delta!==1||last.itemId!==placedId)return null;
+ const prior={...egg,records:egg.records.slice(0,-1),recommendation:plan};
+ if(!eggStoredPlan(prior))return null;
+ const context=unpackEggContext(plan.context),random=planRandom(plan.seed,plan.offset);
+ if(eggContextSequence(context,random,plan.firstId).next().value!==placedId)return null;
+ return {...plan,key:eggRecommendationKey(egg),context:packEggContext(context),offset:random.position,firstId:null,total:plan.total-1,at:Date.now()};
+}
 // Read-only statistics. A physical placement, a removal and a manual correction
 // are distinct operations; their deltas still all contribute to the current count.
 export function eggStatistics(egg,{range=0,itemId=null,now=Date.now(),hour=null}={}){

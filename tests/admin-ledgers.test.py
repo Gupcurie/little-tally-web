@@ -41,6 +41,33 @@ class Handler:
     def _json(self, status, data): self.response = (status, data)
 
 class AdminBooksTest(unittest.TestCase):
+    def test_recommendation_endpoint_requires_admin_session_and_returns_only_the_requested_egg(self):
+        handler = Handler(authenticated=False)
+        handler.path = '/admin/api/accounts/' + A + '/recommendation'
+        with patch.object(admin, 'supabase') as request:
+            admin.Handler.do_GET(handler)
+            self.assertEqual(handler.response[0], 401)
+            request.assert_not_called()
+        handler.authenticated = True
+        egg = payload()['egg']
+        egg['recommendation'] = {'test': 'stored snapshot'}
+        before = copy.deepcopy(egg)
+        with patch.object(admin, 'supabase', return_value=(200, [{'payload': {'egg': egg, 'sales': {}}, 'revision': 7, 'updated_at': 'now'}])) as request:
+            admin.Handler.do_GET(handler)
+            self.assertEqual(handler.response[1], {'egg': egg, 'revision': 7, 'updated_at': 'now'})
+            self.assertIn('user_id=eq.' + A, request.call_args.args[0])
+        self.assertEqual(egg, before)
+
+    def test_recommendation_endpoint_reports_backend_failure_and_missing_ledger(self):
+        handler = Handler()
+        handler.path = '/admin/api/accounts/' + A + '/recommendation'
+        with patch.object(admin, 'supabase', return_value=(503, None)):
+            admin.Handler.do_GET(handler)
+            self.assertEqual(handler.response[0], 503)
+        with patch.object(admin, 'supabase', return_value=(200, [])):
+            admin.Handler.do_GET(handler)
+            self.assertEqual(handler.response[1]['egg'], None)
+
     def test_summary_counts_and_egg_round_include_manual_sets(self):
         stats = admin.ledger_stats(payload())
         self.assertEqual(set(stats), {'sales', 'stock', 'egg'})

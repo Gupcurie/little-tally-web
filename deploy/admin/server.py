@@ -503,6 +503,20 @@ class Handler(BaseHTTPRequestHandler):
             })
             return
 
+        match = re.match(r'^/api/accounts/([0-9a-fA-F-]{36})/recommendation$', path)
+        if match:
+            status, rows = supabase('/rest/v1/tally_ledgers?select=payload,revision,updated_at&user_id=eq.' + match.group(1) + '&limit=1')
+            if status != 200 or not isinstance(rows, list):
+                self._json(503, {'error': 'BACKEND_UNAVAILABLE'})
+                return
+            if not rows:
+                self._json(200, {'egg': None, 'revision': None, 'updated_at': None})
+                return
+            row = rows[0]
+            self._json(200, {'egg': (row.get('payload') or {}).get('egg'),
+                             'revision': row.get('revision'), 'updated_at': row.get('updated_at')})
+            return
+
         match = re.match(r'^/api/accounts/([0-9a-fA-F-]{36})/export$', path)
         if match:
             self._export(match.group(1), (query.get('format') or ['csv'])[0])

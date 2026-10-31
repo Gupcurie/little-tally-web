@@ -296,7 +296,15 @@ function openDetail(account) {
     const title = BOOK_LABELS[key] || key;
     const section = el('section', 'book');
     section.appendChild(el('h3', null, title + ' · ' + book.items + ' 物品 / ' + book.records + ' 记录'));
-    if (key === 'egg') section.appendChild(el('p', 'muted small', '总数 ' + (book.total || 0) + ' 个 · 已完成 ' + (book.round || 0) + ' 轮'));
+    if (key === 'egg') {
+      section.appendChild(el('p', 'muted small', '总数 ' + (book.total || 0) + ' 个 · 已完成 ' + (book.round || 0) + ' 轮'));
+      const preview = el('div', 'recommendation-preview');
+      const view = el('button', 'ghost small', '查看当前推荐与本轮顺序');
+      view.type = 'button';
+      const content = el('div');
+      view.addEventListener('click', () => loadAccountEggPlan(account, content, view));
+      preview.appendChild(view);preview.appendChild(content);section.appendChild(preview);
+    }
     if (!book.lines.length) {
       section.appendChild(el('p', 'muted', '没有物品'));
     } else {
@@ -312,6 +320,50 @@ function openDetail(account) {
     body.appendChild(section);
   }
   $('detail').hidden = false;
+}
+
+function loadRecommendationCore() { return import('/core.js'); }
+async function loadAccountEggPlan(account, target, button) {
+  button.disabled = true;
+  target.textContent = '正在读取当前推荐…';
+  try {
+    const data = await api('/api/accounts/' + account.id + '/recommendation');
+    const core = await loadRecommendationCore();
+    const egg = data.egg, saved = egg && core.eggStoredPlan(egg);
+    target.textContent = '';
+    if (!saved) {
+      target.appendChild(el('p', 'muted small', '该账号尚未同步有效的推荐顺序。请让工作人员刷新放蛋页，再点这里刷新。'));
+      return;
+    }
+    renderAccountEggPlan(target, core, egg, saved);
+  } catch (error) {
+    target.textContent = '读取推荐失败：' + error.message;
+  } finally {
+    button.disabled = false;button.textContent = '刷新当前推荐与本轮顺序';
+  }
+}
+function renderAccountEggPlan(target, core, egg, saved) {
+  const iterator = core.eggSavedSequence(saved), ids = [];
+  const names = Object.fromEntries(egg.items.map(i => [i.id, i.name]));
+  function showMore() {
+    const end = Math.min(saved.total, ids.length + 200);
+    while (ids.length < end) { const next = iterator.next();if (next.done) break;ids.push(next.value); }
+    target.textContent = '';
+    target.appendChild(el('h3', 'recommendation-current', '当前推荐：' + (names[ids[0]] || '—')));
+    target.appendChild(el('p', 'muted small', '第 ' + (saved.context.round + 1) + ' 轮 · 剩余 ' + saved.total + ' 个 · 同步于 ' + core.clock(saved.at, true)));
+    const list = el('ol', 'recommendation-order');
+    ids.forEach((id, index) => {
+      const row = el('li');
+      row.appendChild(el('span', 'muted', index ? '第 ' + (index + 1) + ' 个' : '下一个'));
+      row.appendChild(el('strong', null, names[id] || '物品'));list.appendChild(row);
+    });
+    target.appendChild(list);
+    if (ids.length < saved.total) {
+      const more = el('button', 'ghost small', '继续显示（还有 ' + (saved.total - ids.length) + ' 个）');
+      more.type = 'button';more.addEventListener('click', showMore);target.appendChild(more);
+    } else target.appendChild(el('p', 'muted small', '本轮结束'));
+  }
+  showMore();
 }
 
 async function runAggregate(op) {
