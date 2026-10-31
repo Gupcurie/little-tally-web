@@ -151,3 +151,18 @@ body.egg-screen main{height:calc(100dvh - 76px);overflow:hidden;padding:8px 10px
 body.egg-screen main{height:calc(100dvh - var(--nav-h,64px) - 8px)}
 @media(max-width:400px){.bottom-nav button span{font-size:9px}}
 @media(max-width:336px){.bottom-nav button span{display:none}.bottom-nav button{min-height:40px}}
+/* ---------------- 放蛋卡片：最小高度 + 滚动，禁止溢出重叠 ---------------- */
+.egg-wrap{height:100%;min-height:0}
+.egg-grid{grid-template-rows:none;grid-auto-rows:minmax(116px,1fr);overflow-y:auto;overflow-x:hidden;align-content:start;-webkit-overflow-scrolling:touch}
+.egg-card{padding:7px 9px;gap:3px;min-height:116px}
+.egg-open{display:flex;flex-direction:column;gap:2px;flex:1;min-height:0;overflow:hidden;justify-content:flex-start}
+.egg-head{display:flex;align-items:baseline;justify-content:space-between;gap:6px;min-width:0;width:100%}
+.egg-name{font-size:12px;line-height:1.25;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
+.egg-round{font-size:10px;color:#8a9790;white-space:nowrap;flex:none}
+.egg-count{font-size:clamp(20px,7vw,40px);line-height:1.05;letter-spacing:-.01em}
+.egg-progress{height:8px;flex:none}
+.egg-foot{margin-top:auto}
+.egg-timer{min-width:0;overflow:hidden;text-overflow:ellipsis}
+.egg-toolbar .ghost{background:#fff;border:1px solid #e2e7e0;color:#3b4a42}
+.egg-toolbar .ghost.on{background:#e8f0e3;border-color:#bfd4c4;color:#2c5740}
+@media(max-width:380px){.egg-card{min-height:104px}.egg-count{font-size:clamp(18px,6.4vw,32px)}}

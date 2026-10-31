@@ -204,9 +204,8 @@ function eggCard(p,egg){
  const item=egg.items.find(i=>i.id===p.id)||{};
  return `<article class="egg-card${flash?' flash':''}" data-egg="${e(p.id)}">
   <button class="egg-open" data-action="egg-detail" data-id="${e(p.id)}" aria-label="查看${e(p.name)}的记录">
-   <span class="egg-name">${e(p.name)}</span>
+   <span class="egg-head"><span class="egg-name">${e(p.name)}</span><span class="egg-round">${p.progress}/${p.target}</span></span>
    <strong class="egg-count">${fmt(p.count)}</strong>
-   <span class="egg-round">本轮 ${p.progress}/${p.target}</span>
   </button>
   <div class="egg-progress" role="progressbar" aria-valuemin="0" aria-valuemax="${p.target}" aria-valuenow="${p.progress}"><span style="width:${pct}%"></span></div>
   <div class="egg-foot">
@@ -279,17 +278,14 @@ function eggRecordLine(r,p){
 }
 function fitEggGrid(){
  const grid=main.querySelector('.egg-grid');if(!grid)return;
- const count=grid.children.length,{width,height}=grid.getBoundingClientRect();if(!width||!height)return;
+ const count=grid.children.length;if(!count)return;
+ const width=grid.clientWidth;if(!width)return;
  const gap=parseFloat(getComputedStyle(grid).gap)||8;
- let best=null;
- for(let columns=1;columns<=6;columns++){
-  if(columns>count)break;
-  const rows=Math.ceil(count/columns);
-  const cellW=(width-gap*(columns-1))/columns,cellH=(height-gap*(rows-1))/rows;
-  const score=Math.min(cellW/160,cellH/140)-((rows*columns-count)/Math.max(1,count))*.15;
-  if(!best||score>best.score)best={columns,rows,score};
- }
- if(best){grid.style.setProperty('--egg-columns',best.columns);grid.style.setProperty('--egg-rows',best.rows);state.eggCols=best.columns;}
+ const min=142;
+ let columns=Math.max(1,Math.min(6,Math.floor((width+gap)/(min+gap))));
+ columns=Math.min(columns,count);
+ grid.style.setProperty('--egg-columns',columns);
+ state.eggCols=columns;
 }
 function eggTick(){
  for(const node of main.querySelectorAll('[data-timer]')){node.textContent=sinceText(Number(node.dataset.at)||C.eggLastChange(eggBook(),node.dataset.timer));}
