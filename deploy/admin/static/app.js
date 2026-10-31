@@ -85,7 +85,8 @@ function renderSummary(summary, generatedAt) {
   $('s-items').textContent = summary.items;
   $('s-records').textContent = summary.records;
   $('s-seven').textContent = summary.signed_in_7d;
-  $('updated').textContent = '更新于 ' + fmtDate(new Date(generatedAt * 1000).toISOString());
+  const updated = $('updated');
+  if (updated) updated.textContent = '更新于 ' + fmtDate(new Date(generatedAt * 1000).toISOString());
 }
 
 function statusPill(account) {
@@ -412,15 +413,21 @@ function label(action) {
 
 async function load() {
   showError('');
+  let data;
   try {
-    const data = await api('/api/accounts');
+    data = await api('/api/accounts');
+  } catch (err) {
+    if (err.message !== 'unauthenticated') showError('读取账号失败：' + err.message + '，请稍后刷新重试。');
+    return;
+  }
+  try {
     ACCOUNTS = data.accounts;
     const alive = new Set(ACCOUNTS.map((a) => a.id));
     for (const id of Array.from(SELECTED)) if (!alive.has(id)) SELECTED.delete(id);
     renderSummary(data.summary, data.generated_at);
     renderRows();
   } catch (err) {
-    showError('读取失败：' + err.message + '（后端可能暂时不可用）');
+    showError('管理页面显示异常：' + err.message + '，请刷新页面重试。');
   }
   loadAudit();
 }
