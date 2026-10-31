@@ -236,19 +236,20 @@ function eggCard(p,egg){
 }
 function eggPickKey(egg){
  const counts=C.eggCounts(egg);
- return JSON.stringify(egg.items.map(i=>[i.id,i.ratio,counts[i.id]]));
+ return JSON.stringify([egg.items.map(i=>[i.id,i.ratio,counts[i.id]]),egg.records.slice(-16).map(r=>r.id)]);
 }
 function eggPickId(egg){
  const key=eggPickKey(egg);
  if(state.eggPick?.key===key&&egg.items.some(i=>i.id===state.eggPick.id))return state.eggPick.id;
- state.eggPick=null;
- return C.eggRecommend(egg)?.id||null;
+ const picks=C.eggRecommendationSet(egg,egg.items.length).map(p=>p.id);
+ state.eggPick=picks.length?{key,id:picks[0],picks,alternative:false}:null;
+ return state.eggPick?.id||null;
 }
 function eggReroll(egg){
- const picks=C.eggRecommendationSet(egg,egg.items.length),current=eggPickId(egg);
+ const current=eggPickId(egg),picks=state.eggPick?.picks||[];
  if(picks.length<2)return false;
- const next=picks[(picks.findIndex(p=>p.id===current)+1)%picks.length];
- state.eggPick={key:eggPickKey(egg),id:next.id};
+ const next=picks[(picks.indexOf(current)+1)%picks.length];
+ state.eggPick.id=next;state.eggPick.alternative=next!==picks[0];
  return true;
 }
 function eggView(){
@@ -267,7 +268,7 @@ function eggView(){
  const cols=Math.max(1,state.eggCols||1),lone=shown.length>cols-1&&shown.length%cols===1;
  return `<section class="egg-wrap">
   <div class="egg-reco">
-   <div class="egg-reco-main"><span class="eyebrow">${state.eggPick?'备选放':'最推荐放'}</span><strong>${pick?e(pick.name):'—'}</strong><span class="egg-reco-meta">${pick?`本轮 ${pick.progress}/${pick.target} · 已完成 ${C.eggRound(egg)} 轮`:'先添加物品'}</span></div>
+   <div class="egg-reco-main"><span class="eyebrow">${state.eggPick?.alternative?'备选放':'最推荐放'}</span><strong>${pick?e(pick.name):'—'}</strong><span class="egg-reco-meta">${pick?`本轮 ${pick.progress}/${pick.target} · 已完成 ${C.eggRound(egg)} 轮`:'先添加物品'}</span></div>
    <div class="egg-reco-actions">${pick?`<button class="egg-add-main" data-action="egg-add" data-id="${e(pick.id)}">放一个 +1</button>`:''}<button class="ghost small" data-action="egg-reroll">换一个</button></div>
   </div>
   <div class="egg-toolbar">

@@ -168,28 +168,29 @@ test('ahead-of-round counts never cause a full item to be recommended', () => {
 test('manual changes, ratio edits and record deletion immediately change the recommendation', () => {
   const egg = freshEgg([['甲', 1], ['乙', 1]]);
   const [a, b] = egg.items;
-  assert.equal(C.eggRecommend(egg).id, a.id);
+  const pick = () => C.eggRecommend(egg, { random: () => 0.5 });
+  assert.equal(pick().id, a.id);
   C.eggChange(egg, a.id, 1);
-  assert.equal(C.eggRecommend(egg).id, b.id);
+  assert.equal(pick().id, b.id);
   C.eggChange(egg, a.id, -1);
-  assert.equal(C.eggRecommend(egg).id, a.id);
+  assert.ok(C.eggProgress(egg).find(p => p.id === pick().id).left > 0);
   C.eggSetRatio(egg, b.id, 3);
-  assert.equal(C.eggRecommend(egg).id, b.id);
+  assert.equal(pick().id, b.id);
   C.eggSetCount(egg, b.id, 3);
-  assert.equal(C.eggRecommend(egg).id, a.id);
+  assert.equal(pick().id, a.id);
   C.eggDeleteRecords(egg, new Set([egg.records.at(-1).id]));
-  assert.equal(C.eggRecommend(egg).id, b.id);
+  assert.equal(pick().id, b.id);
 });
 
-test('alternatives are stable, include all eligible items and never change records', () => {
+test('seeded alternatives are reproducible, include all eligible items and never change records', () => {
   const egg = freshEgg([['甲', 100], ['乙', 1], ['丙', 1], ['丁', 1], ['戊', 1]]);
   C.eggSetCount(egg, egg.items[1].id, 1);
   const before = JSON.stringify(egg);
-  const picks = C.eggRecommendationSet(egg, 200);
+  const picks = C.eggRecommendationSet(egg, 200, seeded(42));
   assert.equal(picks.length, 4);
-  assert.equal(picks[0].id, C.eggRecommend(egg).id);
+  assert.equal(picks[0].id, C.eggRecommend(egg, { random: seeded(42) }).id);
   assert.ok(!picks.some(p => p.name === '乙'));
-  for (let k = 0; k < 20; k++) assert.deepEqual(C.eggRecommendationSet(egg, 200), picks);
+  for (let k = 0; k < 20; k++) assert.deepEqual(C.eggRecommendationSet(egg, 200, seeded(42)), picks);
   assert.equal(JSON.stringify(egg), before);
 });
 
@@ -214,14 +215,19 @@ test('sampled ratios and manual starting counts always fill each missing round e
 // Exercise the actual page selection functions without signing in or touching live accounts.
 function pagePicker(egg) {
   const source = readFileSync(new URL('../dist/app.js', import.meta.url), 'utf8');
-  const context = vm.createContext({ C, state: { eggPick: null } });
+  const random = seeded(222); let calculations = 0;
+  const core = { ...C, eggRecommendationSet: (egg, count) => {
+    calculations++; return C.eggRecommendationSet(egg, count, random);
+  } };
+  const context = vm.createContext({ C: core, state: { eggPick: null } });
   vm.runInContext(source.slice(source.indexOf('function eggPickKey('), source.indexOf('function eggView(')), context);
-  return { pick: () => context.eggPickId(egg), change: () => context.eggReroll(egg) };
+  return { pick: () => context.eggPickId(egg), change: () => context.eggReroll(egg),
+    get calculations() { return calculations; }, get selection() { return context.state.eggPick; } };
 }
 
 test('page change button cycles alternatives and stays stable across redraws', () => {
   const egg = freshEgg([['甲', 100], ['乙', 1], ['丙', 1], ['丁', 1], ['戊', 1]]);
-  const page = pagePicker(egg), before = JSON.stringify(egg), seen = new Set([page.pick()]);
+  const page = pagePicker(egg), before = JSON.stringify(egg), first = page.pick(), seen = new Set([first]);
   for (let k = 1; k < 5; k++) {
     const previous = page.pick();
     assert.equal(page.change(), true);
@@ -232,7 +238,8 @@ test('page change button cycles alternatives and stays stable across redraws', (
   }
   assert.equal(seen.size, 5);
   page.change();
-  assert.equal(page.pick(), C.eggRecommend(egg).id);
+  assert.equal(page.pick(), first);
+  assert.equal(page.calculations, 1, 'redraws and alternative selection must not reroll');
   assert.equal(JSON.stringify(egg), before);
 });
 
@@ -242,14 +249,14 @@ test('page discards an alternative when quantities or ratios change, including c
   page.change();
   const previous = page.pick();
   C.eggChange(egg, previous, 1);
-  assert.equal(page.pick(), C.eggRecommend(egg).id);
+  page.pick(); assert.equal(page.calculations, 2);
   assert.notEqual(page.pick(), previous);
   page.change();
   C.eggSetRatio(egg, egg.items[2].id, 10);
-  assert.equal(page.pick(), C.eggRecommend(egg).id);
+  page.pick(); assert.equal(page.calculations, 3);
   page.change();
   egg.records = [];
-  assert.equal(page.pick(), C.eggRecommend(egg).id);
+  page.pick(); assert.equal(page.calculations, 4);
 });
 
 test('page handles a single remaining candidate and an empty book', () => {
@@ -261,4 +268,89 @@ test('page handles a single remaining candidate and an empty book', () => {
   egg.items = []; egg.records = [];
   assert.equal(page.pick(), null);
   assert.equal(page.change(), false);
+});
+
+function simulate(ratios, seed, rounds) {
+  const egg = freshEgg(ratios.map((ratio, k) => [String(k), ratio]));
+  const random = seeded(seed), sequence = [], size = ratios.reduce((a, b) => a + b, 0);
+  for (let k = 0; k < rounds * size; k++) {
+    const pick = C.eggRecommend(egg, { random });
+    assert.ok(C.eggProgress(egg).find(p => p.id === pick.id).left > 0);
+    sequence.push(Number(pick.name));
+    C.eggChange(egg, pick.id, 1);
+    if ((k + 1) % size === 0) {
+      assert.deepEqual(Object.values(C.eggCounts(egg)), ratios.map(r => r * (k + 1) / size));
+    }
+  }
+  return sequence;
+}
+
+test('many random runs preserve exact quotas and avoid adjacency when balanced', () => {
+  for (let seed = 1; seed <= 60; seed++) {
+    for (const ratios of [[4, 4, 4, 4], [2, 3], [9, 1], [6, 3, 1], [40, 35, 15, 8, 2]]) {
+      const seq = simulate(ratios, seed, 3);
+      if (ratios.length === 4) for (let k = 1; k < seq.length; k++) assert.notEqual(seq[k], seq[k - 1]);
+    }
+  }
+});
+
+test('same proportions produce diverse sequences instead of a fixed repeating round', () => {
+  const size = 16, sequences = new Set();
+  for (let seed = 1; seed <= 30; seed++) {
+    const seq = simulate([4, 4, 4, 4], seed, 5);
+    const rounds = Array.from({ length: 5 }, (_, k) => seq.slice(k * size, (k + 1) * size).join(''));
+    assert.ok(new Set(rounds).size >= 3, 'rounds must not replay one fixed order');
+    sequences.add(seq.join(''));
+  }
+  assert.ok(sequences.size >= 25, 'independent random runs must vary');
+});
+
+test('available third items break an A B A pattern instead of continuing A B A B', () => {
+  for (let seed = 1; seed <= 100; seed++) {
+    const egg = freshEgg([['甲', 4], ['乙', 4], ['丙', 4]]);
+    const [a, b, c] = egg.items;
+    C.eggChange(egg, a.id, 1); C.eggChange(egg, b.id, 1); C.eggChange(egg, a.id, 1);
+    assert.equal(C.eggRecommend(egg, { random: seeded(seed) }).id, c.id);
+  }
+});
+
+test('rare prizes are spaced across rounds, not merely within each round', () => {
+  for (let seed = 1; seed <= 40; seed++) {
+    const seq = simulate([40, 35, 15, 8, 2], seed, 4);
+    const positions = seq.map((v, k) => v === 4 ? k : -1).filter(k => k >= 0);
+    for (let k = 1; k < positions.length; k++) {
+      assert.ok(positions[k] - positions[k - 1] >= 32, 'rare prize must retain its cooldown across a round boundary');
+    }
+  }
+});
+
+test('a rare prize manually taken at round end is not recommended again at next round start', () => {
+  for (let seed = 1; seed <= 100; seed++) {
+    const egg = freshEgg([['普通', 6], ['中', 3], ['大奖', 1]]);
+    C.eggSetCount(egg, egg.items[0].id, 6); C.eggSetCount(egg, egg.items[1].id, 3);
+    C.eggChange(egg, egg.items[2].id, 1);
+    assert.equal(C.eggRound(egg), 1);
+    const random = seeded(seed);
+    for (let k = 1; k <= 5; k++) {
+      const pick = C.eggRecommend(egg, { random });
+      assert.notEqual(pick.name, '大奖', 'recent prize history must survive the new round');
+      C.eggChange(egg, pick.id, 1);
+    }
+  }
+});
+
+test('taking a non-recommended item recalculates from actual counts and actual recent history', () => {
+  const egg = freshEgg([['甲', 3], ['乙', 3], ['丙', 3]]), page = pagePicker(egg);
+  const recommended = page.pick(), other = egg.items.find(i => i.id !== recommended);
+  const previous = page.selection;
+  C.eggChange(egg, other.id, 1);
+  const next = page.pick();
+  assert.equal(page.calculations, 2);
+  assert.notEqual(page.selection, previous);
+  assert.notEqual(next, other.id, 'spacing must refer to what was actually taken');
+  const beforeUndo = page.selection;
+  C.eggChange(egg, other.id, -1);
+  page.pick();
+  assert.equal(page.calculations, 3);
+  assert.notEqual(page.selection, beforeUndo);
 });

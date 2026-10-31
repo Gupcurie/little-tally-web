@@ -199,21 +199,56 @@ export function eggDeleteItem(egg,id){
  egg.records=egg.records.filter(r=>r.itemId!==id);
  if(egg.goal&&Object.keys(egg.goal.values||{}).includes(id))egg.goal=null;
 }
-// 按本轮实际进度实时排队；超前数量保留到后续轮次，不挤占本轮缺项。
-// 同样的数量和比例始终得到同样的顺序；高占比需要时允许连放。
-export function eggRecommendationSet(egg,count=4){
+// 从实际数量重新排：本轮配额是硬限制，间隔、避免连出/ABAB 和随机性决定顺序。
+// 不保存预排队列；用户拿了别的、减数或改比例后，都直接按新状态计算。
+function eggRandom(){const value=new Uint32Array(1);globalThis.crypto.getRandomValues(value);return value[0]/4294967296;}
+export function eggRecommendationSet(egg,count=4,random=eggRandom){
  const items=egg.items.filter(i=>Number(i.ratio)>0);
  if(!items.length)return [];
  const c=eggCounts(egg),round=Math.min(...items.map(i=>Math.floor(c[i.id]/i.ratio)));
  const progress=items.map(i=>({...i,progress:Math.min(i.ratio,c[i.id]-round*i.ratio)}));
  const totalRatio=sum(items.map(i=>i.ratio)),placed=sum(progress.map(i=>i.progress));
- return progress.filter(i=>i.progress<i.ratio).map(i=>{
-  const score=(placed+1)*i.ratio-i.progress*totalRatio,deficit=score/totalRatio;
-  return {id:i.id,name:i.name,ratio:i.ratio,deficit,score,round,
-   reason:deficit>0.5?'落后进度较多':'按比例轮转'};
- }).sort((a,b)=>b.score-a.score).slice(0,Math.max(0,count));
+ const eligible=progress.filter(i=>i.progress<i.ratio).map(i=>({...i,left:i.ratio-i.progress}));
+ const gaps=new Map(),recent=[];let distance=0;
+ for(let k=egg.records.length-1;k>=0;k--){
+  const r=egg.records[k];if(r.delta<=0||r.kind!=='count')continue;
+  if(!gaps.has(r.itemId))gaps.set(r.itemId,distance+1);
+  const take=Math.min(r.delta,3-recent.length);for(let j=0;j<take;j++)recent.push(r.itemId);
+  distance+=r.delta;
+  if(gaps.size===items.length&&recent.length===3)break;
+ }
+ const slots=sum(eligible.map(i=>i.left));
+ // 如果还能无连出地放完，就保留这种可能，避免随机消耗配额后尾部只能连放。
+ const feasible=eligible.filter(i=>i.id!==recent[0]&&eligible.every(j=>{
+  const left=j.left-(j.id===i.id?1:0),limit=j.id===i.id?Math.floor((slots-1)/2):Math.ceil((slots-1)/2);
+  return left<=limit;
+ }));
+ // 分层随机出场时刻：周期 T/r，下一次的理想位置 (已出+.5)*T/r。
+ // 在理想位置附近随机浮动，避免固定顺序，又不把稀有项过早耗光。
+ const scheduled=eligible.map(i=>{
+  const period=totalRatio/i.ratio;
+  const due=(i.progress+0.5)*period+(random()-0.5)*2*Math.min(2,period*0.3);
+  return {...i,period,due};
+ });
+ const feasibleIDs=new Set(feasible.map(i=>i.id));
+ let preferred=feasible.length?scheduled.filter(i=>feasibleIDs.has(i.id)):scheduled;
+ // 先应用跨轮间隔，再比较虚拟时刻；不能因为换轮后时刻重置而紧接着出稀有项。
+ const spaced=preferred.filter(i=>(gaps.get(i.id)??Infinity)>=Math.max(1,Math.floor(i.period*0.65)));
+ if(spaced.length)preferred=spaced;
+ // 只在相差两次拿取以内的候选中打散，不能为打散而提前耗掉后半轮配额。
+ const earliest=Math.min(...preferred.map(i=>i.due));
+ preferred=preferred.filter(i=>i.due<=earliest+2);
+ const noRepeat=preferred.filter(i=>i.id!==recent[0]);if(noRepeat.length)preferred=noRepeat;
+ if(recent.length===3&&recent[0]===recent[2]&&recent[0]!==recent[1]){
+  const varied=preferred.filter(i=>i.id!==recent[1]);if(varied.length)preferred=varied;
+ }
+ const preferredIDs=new Set(preferred.map(i=>i.id));
+ return scheduled.map(i=>({id:i.id,name:i.name,ratio:i.ratio,round,score:-i.due,
+  deficit:(placed+1)*i.ratio/totalRatio-i.progress,preferred:preferredIDs.has(i.id),
+  reason:'按比例间隔随机穿插'}))
+  .sort((a,b)=>Number(b.preferred)-Number(a.preferred)||b.score-a.score).slice(0,Math.max(0,count));
 }
-export function eggRecommend(egg){return eggRecommendationSet(egg,1)[0]||null;}
+export function eggRecommend(egg,{random=eggRandom}={}){return eggRecommendationSet(egg,1,random)[0]||null;}
 export class LocalLedger {
  constructor(storage,key='little-tally-pocket-v1') {this.storage=storage;this.key=key;this.state=initialState();this.raw=null;this.readOnly=false;this.error=null;this.reload();}
  reload(){try{const raw=this.storage.getItem(this.key);if(raw!==null){this.state=validateState(JSON.parse(raw));this.raw=raw;}else{this.raw=null;}this.readOnly=false;this.error=null;}catch(e){this.readOnly=true;this.error='本地记录未能读取，原文件没有被覆盖。请先导出原文件，再从备份恢复。';}return !this.readOnly;}
