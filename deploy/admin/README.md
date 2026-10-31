@@ -10,8 +10,22 @@ What it does:
   ledger revision, last save, item and record counts;
 - per-account detail with the item names and current counts of both books;
 - disable / re-enable an account (data is never deleted);
-- issue a new password for an account, shown once;
-- writes an audit trail of logins, bans, unbans and password resets.
+- set a password for an account — generated 12 characters or one the
+  administrator types — shown once;
+- export one account's history: CSV (records with timestamps plus an item
+  summary, UTF-8 BOM so Excel opens it correctly) or the full ledger as JSON
+  for backup; the CSV can also be copied to the clipboard;
+- select several accounts and aggregate them read-only, matched by item name:
+  sum them, or with exactly two selected compute A minus B (selection order is
+  A then B); the table can be copied;
+- writes an audit trail of logins, bans, unbans, password changes, exports and
+  aggregations.
+
+Passwords cannot be displayed — not a limitation of this console: Supabase keeps
+a bcrypt hash in `auth.users.encrypted_password` and no reversible copy. When an
+administrator needs to give a user access, they set a new password instead.
+Aggregation never writes to a ledger and matches items by name (trimmed,
+case-insensitive), so items that differ only in colour are combined.
 
 ## How it stays safe
 

@@ -75,6 +75,44 @@ button:disabled { opacity: .55; cursor: default; }
 .ghost.small { padding: 7px 10px; font-size: 14px; }
 .ghost.warn { color: var(--warn); border-color: #ecd9cf; }
 
+.check {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 14px;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.check input, .pick { width: 18px; height: 18px; accent-color: var(--accent); }
+
+.toolbar select {
+  font: inherit;
+  padding: 9px 10px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: #fbfcfb;
+  color: var(--ink);
+}
+
+.offscreen {
+  position: absolute;
+  left: -9999px;
+  top: 0;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+}
+
+.banner.ok { background: var(--accent-soft); color: var(--accent); }
+
+.row-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 14px;
+}
+
 /* ---------- banners ---------- */
 .banner {
   padding: 10px 12px;
@@ -165,6 +203,37 @@ button:disabled { opacity: .55; cursor: default; }
 
 .cell { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
 .cell strong { overflow-wrap: anywhere; }
+
+.cell.who { flex-direction: row; align-items: center; gap: 8px; }
+.namebox { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+
+/* ---------- aggregate table ---------- */
+.table-scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; margin-bottom: 12px; }
+
+table.agg {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 14px;
+  white-space: nowrap;
+}
+
+table.agg th, table.agg td {
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--line);
+  text-align: left;
+}
+
+table.agg th {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--muted);
+  position: sticky;
+  top: 0;
+  background: var(--panel);
+}
+
+table.agg td.num, table.agg th:not(:first-child) { text-align: right; font-variant-numeric: tabular-nums; }
+table.agg td.total { font-weight: 650; color: var(--accent); }
 
 .actions { flex-direction: row; flex-wrap: wrap; gap: 6px; }
 

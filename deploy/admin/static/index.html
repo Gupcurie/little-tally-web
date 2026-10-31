@@ -32,9 +32,16 @@
   <section class="panel">
     <div class="toolbar">
       <input id="search" type="search" placeholder="搜索用户名" autocomplete="off" spellcheck="false">
+      <label class="check"><input type="checkbox" id="sel-all"> 全选</label>
+      <select id="book">
+        <option value="stock">库存账本</option>
+        <option value="sales">销售账本</option>
+      </select>
+      <button id="btn-sum" class="ghost" type="button" disabled>相加汇总</button>
+      <button id="btn-diff" class="ghost" type="button" disabled>相减 (A−B)</button>
       <button id="reload" class="ghost" type="button">刷新</button>
-      <span id="updated" class="muted"></span>
     </div>
+    <p id="sel-info" class="muted small">未选择账号 · 勾选后可汇总或相减，顺序即 A、B</p>
 
     <div class="table-head">
       <span>用户名</span><span>状态</span><span>物品 / 记录</span><span>最近登录</span><span>操作</span>
@@ -47,7 +54,7 @@
     <div id="audit" class="audit"></div>
   </section>
 
-  <p class="foot muted">仅管理员可见 · 本页不下发任何服务端密钥</p>
+  <p class="foot muted">仅管理员可见 · 本页不下发任何服务端密钥 · 密码为单向哈希，无法查看，只能重置</p>
 </div>
 
 <div id="detail" class="modal" hidden>
@@ -56,7 +63,22 @@
       <h2 id="d-title">账号详情</h2>
       <button id="d-close" class="ghost" type="button">关闭</button>
     </div>
-    <div id="d-body" class="modal-body"></div>
+    <div class="modal-body">
+      <div class="row-actions" id="d-actions"></div>
+      <div id="d-body"></div>
+    </div>
+  </div>
+</div>
+
+<div id="agg" class="modal" hidden>
+  <div class="modal-box">
+    <div class="modal-head">
+      <h2 id="a-title">汇总</h2>
+      <button id="a-close" class="ghost" type="button">关闭</button>
+    </div>
+    <div class="modal-body">
+      <div id="a-body"></div>
+    </div>
   </div>
 </div>
 
@@ -69,6 +91,7 @@
     <div class="modal-body">
       <p id="s-who" class="muted"></p>
       <code id="s-pass" class="pass"></code>
+      <button id="s-copy" class="ghost" type="button">复制密码</button>
       <p class="muted">把这串密码交给该用户，请勿截图外传。关闭后无法再次查看。</p>
     </div>
   </div>

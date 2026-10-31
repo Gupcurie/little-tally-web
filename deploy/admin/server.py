@@ -6,8 +6,10 @@ under /admin/ only. The service_role key stays here and is never sent to the
 browser. Standard library only, so the image needs no package installs.
 """
 import base64
+import csv
 import hashlib
 import hmac
+import io
 import json
 import os
 import re
@@ -15,8 +17,9 @@ import secrets
 import threading
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 SUPABASE_URL = os.environ['SUPABASE_URL'].rstrip('/')
@@ -163,6 +166,90 @@ def ledger_stats(payload):
     return result
 
 
+def fetch_ledgers(ids):
+    """Return {user_id: ledger row} for the given account ids."""
+    if not ids:
+        return {}
+    expr = ','.join(ids)
+    status, rows = supabase('/rest/v1/tally_ledgers?select=user_id,revision,updated_at,payload'
+                            '&user_id=in.(%s)' % expr)
+    if status != 200 or not isinstance(rows, list):
+        return {}
+    return {row.get('user_id'): row for row in rows}
+
+
+def item_totals(book):
+    totals = {}
+    for rec in (book.get('records') or []):
+        if rec.get('kind') == 'count' and rec.get('itemId'):
+            totals[rec['itemId']] = totals.get(rec['itemId'], 0) + (rec.get('delta') or 0)
+    return totals
+
+
+def name_key(name):
+    return ' '.join(str(name or '').split()).lower() or '(未命名)'
+
+
+def aggregate(ids, names, book_key, op):
+    """Read-only aggregation across accounts, matched by item name."""
+    ledgers = fetch_ledgers(ids)
+    rows = {}
+    for uid in ids:
+        row = ledgers.get(uid)
+        payload = (row or {}).get('payload') or {}
+        book = payload.get(book_key) or {}
+        totals = item_totals(book)
+        for item in (book.get('items') or []):
+            key = name_key(item.get('name'))
+            entry = rows.setdefault(key, {'name': (item.get('name') or '(未命名)').strip(),
+                                          'per_user': {}})
+            entry['per_user'][uid] = entry['per_user'].get(uid, 0) + totals.get(item.get('id'), 0)
+
+    out = []
+    for entry in rows.values():
+        values = [entry['per_user'].get(uid, 0) for uid in ids]
+        record = {'name': entry['name'], 'values': values, 'sum': sum(values)}
+        if op == 'diff' and len(ids) == 2:
+            record['diff'] = values[0] - values[1]
+        out.append(record)
+    out.sort(key=lambda r: (-abs(r['diff'] if 'diff' in r else r['sum']), r['name']))
+    return {
+        'book': book_key,
+        'op': op,
+        'users': [{'id': uid, 'username': names.get(uid, '')} for uid in ids],
+        'rows': out,
+        'missing': [uid for uid in ids if uid not in ledgers],
+    }
+
+
+def cst(ms):
+    if not isinstance(ms, (int, float)):
+        return ''
+    return datetime.fromtimestamp(ms / 1000, timezone(timedelta(hours=8))).strftime('%Y-%m-%d %H:%M:%S')
+
+
+def export_csv(username, payload):
+    payload = payload or {}
+    out = io.StringIO()
+    writer = csv.writer(out, lineterminator='\r\n')
+    writer.writerow(['记录时间', '账本', '物品', '数量变化', '类型'])
+    for book_key, label in (('sales', '销售'), ('stock', '库存')):
+        book = payload.get(book_key) or {}
+        names = {item.get('id'): (item.get('name') or '') for item in (book.get('items') or [])}
+        records = sorted(book.get('records') or [], key=lambda r: r.get('at') or 0)
+        for rec in records:
+            writer.writerow([cst(rec.get('at')), label, names.get(rec.get('itemId'), ''),
+                             rec.get('delta', ''), rec.get('kind', '')])
+    writer.writerow([])
+    writer.writerow(['物品汇总', '账本', '物品', '当前数量', ''])
+    for book_key, label in (('sales', '销售'), ('stock', '库存')):
+        book = payload.get(book_key) or {}
+        totals = item_totals(book)
+        for item in (book.get('items') or []):
+            writer.writerow([username, label, item.get('name') or '', totals.get(item.get('id'), 0), ''])
+    return '\ufeff' + out.getvalue()
+
+
 def fetch_accounts():
     users = []
     page = 1
@@ -260,6 +347,16 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(raw)
 
+    def _raw(self, status, body, ctype, extra=None):
+        self.send_response(status)
+        self.send_header('Content-Type', ctype)
+        self.send_header('Content-Length', str(len(body)))
+        self.send_header('Cache-Control', 'no-store')
+        for key, value in (extra or {}).items():
+            self.send_header(key, value)
+        self.end_headers()
+        self.wfile.write(body)
+
     def _file(self, name, ctype):
         path = os.path.join(STATIC_DIR, name)
         try:
@@ -315,9 +412,33 @@ class Handler(BaseHTTPRequestHandler):
         token = self.headers.get('X-CSRF') or ''
         return bool(token) and hmac.compare_digest(token, claims.get('csrf', ''))
 
+    # -- export ------------------------------------------------------------ #
+    def _export(self, user_id, fmt):
+        status, user = supabase('/auth/v1/admin/users/' + user_id)
+        if status != 200 or not isinstance(user, dict):
+            self._json(404, {'error': 'ACCOUNT_NOT_FOUND'})
+            return
+        username = ((user.get('app_metadata') or {}).get('tally_username')) or user_id[:8]
+        payload = (fetch_ledgers([user_id]).get(user_id) or {}).get('payload') or {}
+        stamp = time.strftime('%Y%m%d-%H%M')
+        safe = re.sub(r'[^A-Za-z0-9_-]', '_', username) or 'account'
+        if fmt == 'json':
+            body = json.dumps({'username': username, 'exported_at': cst(time.time() * 1000),
+                               'ledger': payload}, ensure_ascii=False, indent=2).encode('utf-8')
+            ctype, ext = 'application/json; charset=utf-8', 'json'
+        else:
+            body = export_csv(username, payload).encode('utf-8')
+            ctype, ext = 'text/csv; charset=utf-8', 'csv'
+        audit('export', user_id, username, client_ip(self), note=ext)
+        self._raw(200, body, ctype, {
+            'Content-Disposition': 'attachment; filename="tally-%s-%s.%s"' % (safe, stamp, ext),
+        })
+
     # -- routing ----------------------------------------------------------- #
     def do_GET(self):
-        path = self.path.split('?', 1)[0]
+        raw_path = self.path
+        path = raw_path.split('?', 1)[0]
+        query = urllib.parse.parse_qs(raw_path.split('?', 1)[1] if '?' in raw_path else '')
         if path.startswith('/admin'):
             path = path[6:]
         claims = self._session()
@@ -376,6 +497,11 @@ class Handler(BaseHTTPRequestHandler):
             })
             return
 
+        match = re.match(r'^/api/accounts/([0-9a-fA-F-]{36})/export$', path)
+        if match:
+            self._export(match.group(1), (query.get('format') or ['csv'])[0])
+            return
+
         if path == '/api/audit':
             entries = read_audit()
             for entry in entries:
@@ -411,6 +537,36 @@ class Handler(BaseHTTPRequestHandler):
         if path == '/api/logout':
             audit('logout', ip=client_ip(self))
             self._expire_cookies()
+            return
+
+        if path == '/api/aggregate':
+            body = self._body() or {}
+            ids = []
+            for value in (body.get('ids') or []):
+                text = str(value)
+                if re.match(r'^[0-9a-fA-F-]{36}$', text) and text not in ids:
+                    ids.append(text)
+            ids = ids[:40]
+            book = body.get('book') if body.get('book') in ('sales', 'stock') else 'stock'
+            op = 'diff' if body.get('op') == 'diff' else 'sum'
+            if not ids:
+                self._json(400, {'error': 'NO_ACCOUNTS'})
+                return
+            if op == 'diff' and len(ids) != 2:
+                self._json(400, {'error': 'DIFF_NEEDS_TWO'})
+                return
+            try:
+                accounts = fetch_accounts()
+            except Exception:
+                self._json(503, {'error': 'BACKEND_UNAVAILABLE'})
+                return
+            names = {a['id']: a['username'] for a in accounts}
+            if any(uid not in names for uid in ids):
+                self._json(404, {'error': 'ACCOUNT_NOT_FOUND'})
+                return
+            result = aggregate(ids, names, book, op)
+            audit('aggregate', ','.join(ids)[:64], '%s %s' % (book, op), client_ip(self))
+            self._json(200, result)
             return
 
         match = re.match(r'^/api/accounts/([0-9a-fA-F-]{36})/(ban|password)$', path)
