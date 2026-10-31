@@ -127,4 +127,16 @@ export class CloudLedger {
   }finally{clearTimeout(timer);}
  }
  async logout(){if(this.saving)throw new Error('请等当前这笔保存完成后再退出。');const {error}=await this.client.auth.signOut({scope:'local'});if(error)throw new Error('退出未完成，请检查网络后重试。');await this.setSession(null);}
+ async changePassword(oldPassword,newPassword){
+  if(!this.client)throw new Error('账户服务尚未开通。');
+  if(!this.signedIn||!this.user?.email)throw new Error('请先登录。');
+  if(typeof oldPassword!=='string'||!oldPassword)throw new Error('请输入原密码。');
+  if(typeof newPassword!=='string')throw new Error('请输入新密码。');
+  checkPassword(newPassword);
+  if(oldPassword===newPassword)throw new Error('新密码不能和原密码相同。');
+  const {error}=await this.client.auth.signInWithPassword({email:this.user.email,password:oldPassword});
+  if(error){throw new Error(error?.status===429?'尝试过于频繁，请稍后再试。':'原密码不正确。');}
+  const {error:updateError}=await this.client.auth.updateUser({password:newPassword});
+  if(updateError){throw new Error('密码没有改成，请稍后重试。');}
+ }
 }

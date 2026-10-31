@@ -18,19 +18,31 @@ const localMode=new URLSearchParams(location.search).get('local')==='1';
 const ledger=localMode?new BrowserLedger():new CloudLedger(cloudConfig);
 let state={page:['count','history','stats','ratio','settings'].includes(location.hash.slice(1))?location.hash.slice(1):'count',book:'sales',range:0,keyword:'',direction:0,historyLimit:80,selection:new Set(),selecting:false,itemID:null,ratioMode:'parts',ratioSelected:new Set(),ratioValues:Object.create(null),ratioPlan:null,ratioError:null,authMode:'login',baseID:'',selectedHour:null};
 let toastTimer,formSubmit=null,restoreExpected=null,backupReady=null;
+icons.egg='<path d="M12 3c3.6 0 6.5 4.4 6.5 9.2 0 4.4-2.9 8.3-6.5 8.3S5.5 16.6 5.5 12.2C5.5 7.4 8.4 3 12 3z"/><path d="M9.5 9.5c.6-1.2 1.5-2 2.5-2"/>';
+const TAB_LABELS={count:'记数',egg:'放蛋',history:'历史',stats:'统计',ratio:'比例',settings:'设置'};
+const DEFAULT_TABS=['count','egg','history','stats','ratio','settings'];
+const loadTabs=()=>{try{const raw=JSON.parse(localStorage.getItem('little-tally-tabs')||'null');if(Array.isArray(raw)&&raw.length===DEFAULT_TABS.length&&DEFAULT_TABS.every(k=>raw.includes(k)))return raw;}catch{}return DEFAULT_TABS.slice();};
+const saveTabs=tabs=>{try{localStorage.setItem('little-tally-tabs',JSON.stringify(tabs));}catch{}};
+Object.assign(state,{eggPick:null,eggOnlyLeft:false,eggItemID:null,eggSelecting:false,eggSelection:new Set(),eggArrange:false,eggFlash:null,eggDraft:null,eggCols:2,tabDrag:null});
+let TABS=loadTabs();
 function book(){return ledger.state[state.book];}
 function toast(text){const node=document.querySelector('#toast');node.textContent=text;node.classList.add('show');clearTimeout(toastTimer);toastTimer=setTimeout(()=>node.classList.remove('show'),3600);}
 function timeBadge(){return ledger.savedAt?`${localMode?'本机已保存':'云端已保存'} ${C.clock(ledger.savedAt)}`:localMode?'自动保存到本机':'登录后自动保存到云端';}
 function render(){
  document.body.classList.toggle('count-screen',(localMode||ledger.signedIn)&&!ledger.loading&&!ledger.readOnly&&state.page==='count'&&!state.itemID);
+ document.body.classList.toggle('egg-screen',(localMode||ledger.signedIn)&&!ledger.loading&&!ledger.readOnly&&state.page==='egg'&&!state.eggItemID);
  document.querySelector('[data-icon="install"]').innerHTML=icon('install');
  if(!localMode&&(!ledger.signedIn||ledger.loading)){nav.hidden=true;main.innerHTML=loginView();return;}
  nav.hidden=false;
- nav.innerHTML=[['count','记数'],['history','历史'],['stats','统计'],['ratio','比例'],['settings','设置']].map(([p,label])=>`<button data-action="page" data-page="${p}" class="${state.page===p?'active':''}" ${state.page===p?'aria-current="page"':''}>${icon(p)}<span>${label}</span></button>`).join('');
+ nav.innerHTML=TABS.map(p=>`<button data-action="page" data-page="${p}" class="${state.page===p?'active':''}" ${state.page===p?'aria-current="page"':''}>${icon(p)}<span>${TAB_LABELS[p]}</span></button>`).join('');
  if(ledger.readOnly&&state.page!=='settings'){main.innerHTML=`<div class="empty">${icon('shield')}<strong>先保护好你的记录</strong><p>${e(ledger.error)}</p>${!localMode?'<button class="primary-button" data-action="sync-cloud">重新同步云端记录</button>':''}<button class="secondary-button" style="margin-top:12px" data-action="page" data-page="settings">查看恢复与备份</button></div>`;return;}
- if(state.itemID&&state.page==='count')main.innerHTML=detailView();
- else main.innerHTML=({count:countView,history:historyView,stats:statsView,ratio:ratioView,settings:settingsView}[state.page]||countView)();
- fitItemGrid();
+ if(state.eggItemID&&state.page==='egg')main.innerHTML=eggDetailView();
+ else if(state.itemID&&state.page==='count')main.innerHTML=detailView();
+ else{
+  try{main.innerHTML=({count:countView,egg:eggView,history:historyView,stats:statsView,ratio:ratioView,settings:settingsView}[state.page]||countView)();}
+  catch(err){state.eggItemID=null;state.page='count';main.innerHTML=countView();toast('这个页面刚刚没打开，已回到记数页。');}
+ }
+ fitItemGrid();fitEggGrid();
 }
 function fitItemGrid(){
  const grid=main.querySelector('.count-dashboard .item-grid');if(!grid)return;
@@ -75,7 +87,19 @@ function statsView(){
  <section class="panel"><h2>物品占比与排行</h2>${book().items.slice().sort((a,b)=>c[b.id]-c[a.id]).map(i=>{const p=pos?Math.max(0,c[i.id])/pos*100:0;return `<div class="rank-row"><div class="rank-title"><span>${e(i.name)}</span><small>${fmt(c[i.id])} 件 · ${p.toFixed(1)}%</small></div><div class="rank-track"><div class="rank-fill" style="width:${p}%"></div></div></div>`;}).join('')}<p class="hint">占比按各物品正的净增加数量计算；修正发生在哪个时间，就记入哪个时间。</p></section>`;
 }
 function detailView(){const i=book().items.find(i=>i.id===state.itemID);if(!i){state.itemID=null;return countView();}const c=C.counts(book()),rows=book().records.filter(r=>r.itemId===i.id).sort((a,b)=>b.at-a.at);return `<button class="back-button" data-action="detail-back">${icon('back')}返回我的物品</button><div class="detail-hero"><div class="heading-row"><h1 class="page-title" style="font-size:23px">${e(i.name)}</h1><button class="small-button" data-action="edit-count" data-id="${e(i.id)}">${icon('edit')}改数</button></div><div class="sheet-amount">${fmt(c[i.id])}<small style="font-size:13px;letter-spacing:0;margin-left:10px">件</small></div><p class="inline-caption">创建于 ${e(C.clock(i.created,true))}</p></div>${state.book==='stock'?`<section class="panel"><div class="heading-row"><h2 style="margin:0">库存分项</h2><button class="small-button" data-action="add-part" data-id="${e(i.id)}">${icon('plus')}添加</button></div><div class="stock-part-row"><span>未分类</span><b class="value" style="font-weight:400">${fmt(c[i.id]-C.partsTotal(i))}</b></div>${Object.entries(i.breakdown).map(([name,n])=>`<div class="stock-part-row"><span>${e(name)}</span><button class="value green" data-action="edit-part" data-id="${e(i.id)}" data-part="${e(name)}" aria-label="修改${e(name)}">${fmt(n)}</button><button class="red" data-action="delete-part" data-id="${e(i.id)}" data-part="${e(name)}" aria-label="删除${e(name)}分项">${icon('trash')}</button></div>`).join('')}<p class="hint">增加分项先从未分类划入，不够时增加总库存。减少分项扣减总库存；删除分项并入未分类。</p></section>`:''}<section class="panel"><h2>最近记录 <span class="muted" style="font-size:11px;font-weight:400">${rows.length} 条</span></h2>${rows.length?rows.slice(0,80).map(r=>recordLine(r)).join(''):empty('还没有记数记录')}</section>`;}
+function eggRatioView(){
+ const egg=eggBook();
+ if(!egg.items.length)return `${pageHeading('RATIO','放蛋比例','先添加物品，再给每个物品设比例。')}<div class="book-switch">${[['sales','销售记数'],['stock','库存点数'],['egg','放蛋']].map(([k,l])=>`<button data-action="book" data-book="${k}" class="${state.book===k?'active':''}">${l}</button>`).join('')}</div><section class="panel">${empty('还没有放蛋物品','去放蛋页添加。')}<button class="primary-button" data-action="egg-add-item">添加物品</button></section>`;
+ const draft=state.eggDraft||(state.eggDraft=Object.fromEntries(egg.items.map(i=>[i.id,String(i.ratio)])));
+ const progress=C.eggProgress(egg),byId=Object.fromEntries(progress.map(p=>[p.id,p])),round=C.eggRound(egg);
+ const total=C.sum(egg.items.map(i=>i.ratio));
+ return `${pageHeading('RATIO','放蛋比例',`${egg.items.length} 个物品 · 一轮 ${total} 个 · 已完成 ${round} 轮`)}
+ <div class="book-switch">${[['sales','销售记数'],['stock','库存点数'],['egg','放蛋']].map(([k,l])=>`<button data-action="book" data-book="${k}" class="${state.book===k?'active':''}">${l}</button>`).join('')}</div>
+ <section class="panel"><h2>每个物品的比例</h2>${egg.items.map(i=>`<div class="ratio-row"><label><span>${e(i.name)}<small>现有 ${fmt(byId[i.id].count)} 个 · 本轮 ${byId[i.id].progress}/${i.ratio}</small></span></label><input class="ratio-input" data-egg-ratio="${e(i.id)}" inputmode="numeric" aria-label="${e(i.name)}的比例" value="${e(draft[i.id]??i.ratio)}"></div>`).join('')}<p class="hint">比例是“一轮里放几个”。占比越小，算法把它排得越开；一轮里每个物品都要放满自己的比例。</p><div class="button-pair" style="margin-top:14px"><button class="secondary-button" data-action="egg-ratio-reset">恢复当前</button><button class="primary-button" data-action="egg-ratio-save">固定此比例</button></div></section>
+ <section class="panel"><h2>只看缺的</h2><p class="inline-caption">放满 ${total} 个正好一轮，多出来的自动算进下一轮。</p><button class="list-button" data-action="egg-only">${icon('target')}<span>${state.eggOnlyLeft?'当前：只显示还缺的':'当前：显示全部物品'}</span>${icon('arrow','chevron')}</button></section>`;
+}
 function ratioView(){
+ if(state.book==='egg')return eggRatioView();
  const b=book(),c=C.counts(b),base=b.items.find(i=>i.id===state.baseID),p=state.ratioPlan;
  return `${pageHeading('A LITTLE MORE BALANCE','配比，心里有数',`${title(state.book)} · 仅增加数量，自动计算还差多少`)}${bookPicker()}<section class="panel"><h2>基准换算</h2><select class="field-select" id="base-select" aria-label="选择基准物品"><option value="">选择一个有数量的物品</option>${b.items.map(i=>`<option value="${e(i.id)}" ${state.baseID===i.id?'selected':''}>${e(i.name)} · ${c[i.id]} 件</option>`).join('')}</select>${base&&c[base.id]>0?`<div style="margin-top:12px">${b.items.map(i=>`<div class="row" style="min-height:40px"><span class="row-main row-title">${e(i.name)}</span><span class="inline-caption">${(c[i.id]/c[base.id]).toFixed(3)} 份</span></div>`).join('')}</div>`:'<p class="hint">以所选物品 1 件为基准，换算其他物品的相对数量。</p>'}</section>
  <div class="section-spacer"></div><div class="heading-row"><h2>目标配比</h2>${b.goal?'<span class="badge">已有固定目标</span>':''}</div><div class="book-switch">${[['parts','比例份数'],['percent','百分比']].map(([k,label])=>`<button data-action="ratio-mode" data-mode="${k}" class="${state.ratioMode===k?'active':''}">${label}</button>`).join('')}</div><section class="panel">${b.items.map(i=>`<div class="ratio-row"><label><input type="checkbox" data-ratio-check="${e(i.id)}" ${state.ratioSelected.has(i.id)?'checked':''}><span>${e(i.name)}<small>现有 ${fmt(c[i.id])} 件</small></span></label><input class="ratio-input" data-ratio-value="${e(i.id)}" aria-label="${e(i.name)}${state.ratioMode==='parts'?'份数':'百分比'}" inputmode="${state.ratioMode==='parts'?'numeric':'decimal'}" placeholder="${state.ratioMode==='parts'?'份数':'%'}" value="${e(state.ratioValues[i.id]??'')}" ${state.ratioSelected.has(i.id)?'':'disabled'}>${state.ratioMode==='percent'?'<span class="muted" style="font-size:12px">%</span>':''}</div>`).join('')}<p class="hint">${state.ratioMode==='parts'?'按较大份数分轮补齐，未选物品不参与。70∶1 时，80/1 先补前者 60；141/1 先补后者 1。':'输入选中物品占全部物品的百分比，最多两位小数。未选物品会保留现有数量，并计算合计还需补多少。'}</p></section><button class="primary-button" data-action="calculate">${icon('ratio')}计算补齐方案</button>${state.ratioError?`<div class="soft-message error">${e(state.ratioError)}</div>`:''}${p?`<section class="panel" style="background:#e8f0e3"><h2>${p.added?'还需补充':'✓ 固定目标已达标'}</h2><p class="inline-caption">${e(p.note)}</p>${b.items.filter(i=>p.additions[i.id]>0).map(i=>`<div class="result-line"><span>${e(i.name)}</span><strong>+${fmt(p.additions[i.id])}</strong></div>`).join('')}${p.other?`<div class="result-line"><span>其他物品合计</span><strong>+${fmt(p.other)}</strong></div>`:''}<p class="hint">补完后总量 ${fmt(p.total)} 件</p><button class="primary-button" style="margin-top:15px" data-action="save-goal">保存为固定目标</button></section>`:''}${b.goal?'<button class="small-button red" style="width:100%;margin-top:12px" data-action="clear-goal">取消当前固定目标</button>':''}`;
@@ -83,7 +107,111 @@ function ratioView(){
 function localSettingsView(){return `${pageHeading('KEEP EVERY LITTLE MOMENT','好好收着，每一笔','本机自动保存 · 不需要注册账户')}<section class="panel"><div class="row"><span class="record-symbol">${icon('shield')}</span><div class="row-main"><div class="row-title">${ledger.readOnly?'记录处于保护状态':'自动保存已开启'}</div><div class="row-meta">${e(ledger.readOnly?ledger.error:timeBadge())}</div></div><span class="badge">本机</span></div><p class="hint">每次操作先写入成功，再更新数量；重新打开自动读取上次记录。保留上一份和跨日恢复副本，且不会自动用空数据覆盖损坏记录。</p></section>
  ${ledger.readOnly?`<section class="panel"><h2>恢复本机记录</h2>${ledger.recoverable?'<button class="primary-button" data-action="recover-local">恢复找到的本机副本</button>':'<p class="inline-caption">尚未找到有效本机副本，请从导出的完整备份恢复。</p>'}<button class="list-button" data-action="export-raw">${icon('download')}<span>导出未能读取的原文件</span>${icon('arrow','chevron')}</button><button class="list-button" data-action="import-all">${icon('upload')}<span>从完整备份恢复</span>${icon('arrow','chevron')}</button></section>`:`<section class="panel"><h2>完整备份与恢复</h2><button class="list-button" data-action="export-all">${icon('download')}<span>导出全部记录</span><span class="badge" style="flex:0">推荐</span>${icon('arrow','chevron')}</button><button class="list-button" data-action="import-all">${icon('upload')}<span>从完整备份恢复</span>${icon('arrow','chevron')}</button><button class="list-button" data-action="previous">${icon('history')}<span>找回上一份本机副本</span>${icon('arrow','chevron')}</button><button class="list-button" data-action="copy-report">${icon('copy')}<span>复制今日记数与库存</span>${icon('arrow','chevron')}</button></section><section class="panel"><h2>安卓／iOS 账本迁移</h2>${['sales','stock'].map(k=>`<button class="list-button" data-action="export-book" data-book="${k}">${icon('download')}<span>导出${title(k)}</span>${icon('arrow','chevron')}</button><button class="list-button" data-action="import-book" data-book="${k}">${icon('upload')}<span>导入${title(k)}备份</span>${icon('arrow','chevron')}</button>`).join('')}</section>`}
  <section class="panel"><h2>在手机上更顺手</h2><button class="list-button" data-action="install">${icon('install')}<span>添加到主屏幕</span>${icon('arrow','chevron')}</button><button class="list-button" data-action="persist">${icon('shield')}<span>${ledger.protection?'已获浏览器持久存储权限':'请求浏览器保留本机记录'}</span>${icon('arrow','chevron')}</button></section><div class="backup-note"><b>本机保存，也要留一份备份。</b><br>清除网站数据、换浏览器或设备，会影响本机记录。请把“全部记录”备份存到“文件”App 或自己的网盘。添加到主屏幕后，请固定从同一个入口使用；不同浏览器和主屏幕版可能拥有不同的存储空间。<br><br>网页代码可以公开访问，你的计数记录只保存在当前设备，不会上传到 GitHub。</div><p class="hint" style="text-align:center;margin-top:25px">LITTLE TALLY · 小小记网页版 1.0</p>`;}
-function settingsView(){if(localMode)return localSettingsView();return `${pageHeading('KEEP EVERY LITTLE MOMENT','好好收着，每一笔','独立账户 · 云端保存 · 本机备用副本')}<section class="panel"><div class="row"><span class="record-symbol">${icon('shield')}</span><div class="row-main"><div class="row-title">${e(ledger.user?.username||'我的账户')}</div><div class="row-meta">${e(ledger.readOnly?ledger.error:timeBadge())}</div></div><span class="badge">云端账户</span></div><p class="hint">每次操作收到云端保存确认后再更新数量。再次登录读取当前账户的云端记录，其他账户不能读取你的账本。</p>${ledger.cacheWarning?`<p class="sheet-error">${e(ledger.cacheWarning)}</p>`:''}<button class="list-button" data-action="sync-cloud">${icon('history')}<span>重新同步云端记录</span>${icon('arrow','chevron')}</button></section><section class="panel"><h2>备份与恢复</h2>${ledger.readOnly?`<button class="list-button" data-action="export-raw">${icon('download')}<span>导出当前原始文件</span>${icon('arrow','chevron')}</button>`:`<button class="list-button" data-action="export-all">${icon('download')}<span>导出当前账户全部记录</span>${icon('arrow','chevron')}</button>`}<button class="list-button" data-action="import-all">${icon('upload')}<span>从完整备份恢复到当前账户</span>${icon('arrow','chevron')}</button><button class="list-button" data-action="previous">${icon('history')}<span>恢复上一份云端副本</span>${icon('arrow','chevron')}</button><p class="hint">云端保留最近 5 个历史版本供恢复。它们仍位于同一数据库，重要记录请另外导出保存。</p></section>${!ledger.readOnly?`<section class="panel"><h2>账本迁移与分享</h2>${['sales','stock'].map(k=>`<button class="list-button" data-action="export-book" data-book="${k}">${icon('download')}<span>导出${title(k)}</span>${icon('arrow','chevron')}</button><button class="list-button" data-action="import-book" data-book="${k}">${icon('upload')}<span>导入${title(k)}备份</span>${icon('arrow','chevron')}</button>`).join('')}<button class="list-button" data-action="copy-report">${icon('copy')}<span>复制今日记数与库存</span>${icon('arrow','chevron')}</button></section>`:''}<section class="panel"><h2>在手机上更顺手</h2><button class="list-button" data-action="install">${icon('install')}<span>添加到主屏幕</span>${icon('arrow','chevron')}</button><button class="list-button" data-action="persist">${icon('shield')}<span>请求保留本机备用副本</span>${icon('arrow','chevron')}</button></section><button class="secondary-button" data-action="logout" ${ledger.saving?'disabled':''}>退出当前账户</button><div class="backup-note">退出登录不会删除云端记录。同一台手机换人使用，请先退出当前账户；退出时会清除本页面的账本和当前账户的本机备用副本。<br><br>免费云服务有额度和可用性限制，重要记录请定期导出到自己的“文件”App 或网盘。</div><p class="hint" style="text-align:center;margin-top:25px">LITTLE TALLY · 小小记网页版 1.1</p>`;}
+function settingsView(){if(localMode)return localSettingsView();return `${pageHeading('KEEP EVERY LITTLE MOMENT','好好收着，每一笔','独立账户 · 云端保存 · 本机备用副本')}<section class="panel"><div class="row"><span class="record-symbol">${icon('shield')}</span><div class="row-main"><div class="row-title">${e(ledger.user?.username||'我的账户')}</div><div class="row-meta">${e(ledger.readOnly?ledger.error:timeBadge())}</div></div><span class="badge">云端账户</span></div><p class="hint">每次操作收到云端保存确认后再更新数量。再次登录读取当前账户的云端记录，其他账户不能读取你的账本。</p>${ledger.cacheWarning?`<p class="sheet-error">${e(ledger.cacheWarning)}</p>`:''}<button class="list-button" data-action="sync-cloud">${icon('history')}<span>重新同步云端记录</span>${icon('arrow','chevron')}</button></section><section class="panel"><h2>账户安全</h2><button class="list-button" data-action="change-password">${icon('shield')}<span>修改密码</span>${icon('arrow','chevron')}</button><p class="hint">要先输入现在的密码，再输入两次新密码。</p></section><section class="panel"><h2>备份与恢复</h2>${ledger.readOnly?`<button class="list-button" data-action="export-raw">${icon('download')}<span>导出当前原始文件</span>${icon('arrow','chevron')}</button>`:`<button class="list-button" data-action="export-all">${icon('download')}<span>导出当前账户全部记录</span>${icon('arrow','chevron')}</button>`}<button class="list-button" data-action="import-all">${icon('upload')}<span>从完整备份恢复到当前账户</span>${icon('arrow','chevron')}</button><button class="list-button" data-action="previous">${icon('history')}<span>恢复上一份云端副本</span>${icon('arrow','chevron')}</button><p class="hint">云端保留最近 5 个历史版本供恢复。它们仍位于同一数据库，重要记录请另外导出保存。</p></section>${!ledger.readOnly?`<section class="panel"><h2>账本迁移与分享</h2>${['sales','stock'].map(k=>`<button class="list-button" data-action="export-book" data-book="${k}">${icon('download')}<span>导出${title(k)}</span>${icon('arrow','chevron')}</button><button class="list-button" data-action="import-book" data-book="${k}">${icon('upload')}<span>导入${title(k)}备份</span>${icon('arrow','chevron')}</button>`).join('')}<button class="list-button" data-action="copy-report">${icon('copy')}<span>复制今日记数与库存</span>${icon('arrow','chevron')}</button></section>`:''}<section class="panel"><h2>在手机上更顺手</h2><button class="list-button" data-action="install">${icon('install')}<span>添加到主屏幕</span>${icon('arrow','chevron')}</button><button class="list-button" data-action="persist">${icon('shield')}<span>请求保留本机备用副本</span>${icon('arrow','chevron')}</button></section><button class="secondary-button" data-action="logout" ${ledger.saving?'disabled':''}>退出当前账户</button><div class="backup-note">退出登录不会删除云端记录。同一台手机换人使用，请先退出当前账户；退出时会清除本页面的账本和当前账户的本机备用副本。<br><br>免费云服务有额度和可用性限制，重要记录请定期导出到自己的“文件”App 或网盘。</div><p class="hint" style="text-align:center;margin-top:25px">LITTLE TALLY · 小小记网页版 1.1</p>`;}
+// ---------------------------------------------------------------------------
+// 放蛋
+// ---------------------------------------------------------------------------
+function eggBook(){return C.ensureEgg(ledger.state);}
+function eggOrder(egg){
+ const known=egg.items.map(i=>i.id),order=Array.isArray(egg.order)?egg.order.filter(id=>known.includes(id)):[];
+ for(const id of known)if(!order.includes(id))order.push(id);
+ return order;
+}
+function sinceText(at){
+ if(!at)return '还没有记录';
+ const seconds=Math.max(0,Math.floor((Date.now()-at)/1000));
+ if(seconds<10)return '刚刚';
+ if(seconds<60)return seconds+' 秒前';
+ if(seconds<3600)return Math.floor(seconds/60)+' 分前';
+ if(seconds<86400)return Math.floor(seconds/3600)+' 小时 '+(Math.floor(seconds/60)%60)+' 分前';
+ return Math.floor(seconds/86400)+' 天前';
+}
+function eggCard(p,egg){
+ const flash=state.eggFlash&&state.eggFlash.id===p.id&&Date.now()-state.eggFlash.at<6000;
+ const pct=p.target?Math.min(100,Math.round(p.progress/p.target*100)):0;
+ return `<article class="egg-card${flash?' flash':''}" data-egg="${e(p.id)}">
+  <button class="egg-open" data-action="egg-detail" data-id="${e(p.id)}" aria-label="查看${e(p.name)}的记录">
+   <span class="egg-name">${e(p.name)}</span>
+   <strong class="egg-count">${fmt(p.count)}</strong>
+   <span class="egg-round">本轮 ${p.progress}/${p.target}</span>
+  </button>
+  <div class="egg-progress" role="progressbar" aria-valuemin="0" aria-valuemax="${p.target}" aria-valuenow="${p.progress}"><span style="width:${pct}%"></span></div>
+  <div class="egg-foot">
+   <span class="egg-timer" data-timer="${e(p.id)}">${sinceText(C.eggLastChange(egg,p.id))}</span>
+   ${state.eggArrange?`<span class="egg-move">
+     <button data-action="egg-move" data-id="${e(p.id)}" data-step="-cols" aria-label="上移">▲</button>
+     <button data-action="egg-move" data-id="${e(p.id)}" data-step="-1" aria-label="左移">◀</button>
+     <button data-action="egg-move" data-id="${e(p.id)}" data-step="1" aria-label="右移">▶</button>
+     <button data-action="egg-move" data-id="${e(p.id)}" data-step="cols" aria-label="下移">▼</button>
+   </span>`:`<button class="egg-plus" data-action="egg-add" data-id="${e(p.id)}" aria-label="${e(p.name)}放一个">+1</button>`}
+  </div>
+ </article>`;
+}
+function eggPickId(egg,byId){
+ const current=state.eggPick;
+ if(current&&byId[current])return current;
+ const pick=C.eggRecommend(egg);
+ state.eggPick=pick?pick.id:null;
+ return state.eggPick;
+}
+function eggView(){
+ const egg=eggBook();
+ if(!egg.items.length)return `<section class="egg-empty">${icon('egg')}<strong>先添加要放的物品</strong><p>给每个物品设好比例，之后点一下就是放一个蛋。</p><div class="egg-empty-actions"><button class="primary-button" data-action="egg-add-item">添加物品</button><button class="secondary-button" data-action="page" data-page="ratio">去设比例</button></div></section>`;
+ const progress=C.eggProgress(egg),byId=Object.fromEntries(progress.map(p=>[p.id,p]));
+ const ids=eggOrder(egg).filter(id=>byId[id]);
+ const shown=state.eggOnlyLeft?ids.filter(id=>byId[id].left>0):ids;
+ const pickId=eggPickId(egg,byId),pick=pickId?byId[pickId]:null;
+ const round=C.eggRound(egg);
+ return `<section class="egg-wrap">
+  <div class="egg-reco">
+   <div class="egg-reco-main"><span class="eyebrow">最推荐放</span><strong>${pick?e(pick.name):'—'}</strong><span class="egg-reco-meta">${pick?`本轮 ${pick.progress}/${pick.target}${round?` · 已完成 ${round} 轮`:''}`:'先添加物品'}</span></div>
+   <div class="egg-reco-actions">${pick?`<button class="egg-add-main" data-action="egg-add" data-id="${e(pick.id)}">放一个 +1</button>`:''}<button class="ghost small" data-action="egg-reroll">换一个</button></div>
+  </div>
+  <div class="egg-toolbar">
+   <button class="ghost small${state.eggOnlyLeft?' on':''}" data-action="egg-only">${state.eggOnlyLeft?'只看缺的':'显示全部'}</button>
+   <button class="ghost small${state.eggArrange?' on':''}" data-action="egg-arrange">${state.eggArrange?'完成排列':'排列位置'}</button>
+   <button class="ghost small" data-action="egg-add-item">添加物品</button>
+  </div>
+  <div class="egg-grid" data-columns="${state.eggCols}">${shown.length?shown.map(id=>eggCard(byId[id],egg)).join(''):`<p class="egg-none">这一轮都放满了，继续放就会进入下一轮。</p>`}</div>
+ </section>`;
+}
+function eggDetailView(){
+ const egg=eggBook(),p=C.eggProgress(egg).find(x=>x.id===state.eggItemID);
+ if(!p){state.eggItemID=null;return eggView();}
+ const rows=egg.records.filter(r=>r.itemId===p.id).sort((a,b)=>b.at-a.at);
+ return `<button class="back-button" data-action="egg-back">${icon('back')}返回放蛋</button>
+ <section class="panel egg-detail-head">
+  <div class="heading-row"><h1 class="page-title" style="font-size:23px">${e(p.name)}</h1><span class="badge">比例 ${p.ratio}</span></div>
+  <div class="egg-detail-numbers"><div><small>当前</small><strong>${fmt(p.count)}</strong></div><div><small>本轮</small><strong>${p.progress}/${p.target}</strong></div><div><small>距上次</small><strong data-timer="${e(p.id)}">${sinceText(C.eggLastChange(egg,p.id))}</strong></div></div>
+  <div class="egg-progress big" role="progressbar" aria-valuemin="0" aria-valuemax="${p.target}" aria-valuenow="${p.progress}"><span style="width:${Math.min(100,Math.round(p.progress/p.target*100))}%"></span></div>
+  <div class="button-pair" style="margin-top:14px"><button class="secondary-button" data-action="egg-minus" data-id="${e(p.id)}">${icon('minus')}减一</button><button class="primary-button" data-action="egg-add" data-id="${e(p.id)}">${icon('plus')}放一个</button></div>
+ </section>
+ <section class="panel"><div class="heading-row"><h2 style="margin:0">记录 <span class="muted" style="font-size:11px;font-weight:400">${rows.length} 条</span></h2><button class="small-button" data-action="egg-select">${state.eggSelecting?'完成':'多选删除'}</button></div>
+ ${state.eggSelecting?`<div class="selection-actions"><button data-action="egg-select-all">全选</button><button class="remove" data-action="egg-delete-selected" ${state.eggSelection.size?'':'disabled'}>删除 ${state.eggSelection.size} 条</button></div>`:''}
+ ${rows.length?rows.slice(0,200).map(r=>eggRecordLine(r,p)).join(''):empty('还没有记录','点“放一个”就会记下时间。')}</section>`;
+}
+function eggRecordLine(r,p){
+ const active=state.eggSelection.has(r.id);
+ return `<div class="record-wrap"><div class="row${active?' picked':''}">${state.eggSelecting?`<input class="record-check" type="checkbox" data-egg-record="${e(r.id)}" aria-label="选择这条记录" ${active?'checked':''}>`:`<span class="record-symbol ${r.delta<0?'negative':''}">${icon(r.delta>=0?'plus':'minus')}</span>`}<div class="row-main"><div class="row-title">${e(p.name)}</div><div class="row-meta">${e(C.clock(r.at,true))}${r.kind==='set'?' · 手动改数':''}</div></div><span class="row-number ${r.delta<0?'red':'green'}">${r.delta>0?'+':''}${fmt(r.delta)}</span>${!state.eggSelecting?`<button class="delete-small" data-action="egg-delete-record" data-id="${e(r.id)}" aria-label="删除这条记录">${icon('trash')}</button>`:''}</div></div>`;
+}
+function fitEggGrid(){
+ const grid=main.querySelector('.egg-grid');if(!grid)return;
+ const count=grid.children.length,{width,height}=grid.getBoundingClientRect();if(!width||!height)return;
+ const gap=parseFloat(getComputedStyle(grid).gap)||8;
+ let best=null;
+ for(let columns=1;columns<=6;columns++){
+  if(columns>count)break;
+  const rows=Math.ceil(count/columns);
+  const cellW=(width-gap*(columns-1))/columns,cellH=(height-gap*(rows-1))/rows;
+  const score=Math.min(cellW/160,cellH/140)-((rows*columns-count)/Math.max(1,count))*.15;
+  if(!best||score>best.score)best={columns,rows,score};
+ }
+ if(best){grid.style.setProperty('--egg-columns',best.columns);grid.style.setProperty('--egg-rows',best.rows);state.eggCols=best.columns;}
+}
+function eggTick(){
+ for(const node of main.querySelectorAll('[data-timer]')){node.textContent=sinceText(Number(node.dataset.at)||C.eggLastChange(eggBook(),node.dataset.timer));}
+}
+async function mutateEgg(fn){await ledger.commit(s=>fn(C.ensureEgg(s)));state.eggDraft=null;state.eggPick=null;render();}
 function showSheet(title,body,submit=null,button='保存'){formSubmit=submit;sheetContent.innerHTML=`<div class="sheet-top"><h2 id="sheet-title">${e(title)}</h2><button class="icon-button" data-action="close-sheet" aria-label="关闭">${icon('close')}</button></div><form id="sheet-form">${body}<div class="sheet-error" id="sheet-error" role="alert"></div>${submit?`<div class="button-pair"><button class="secondary-button" type="button" data-action="close-sheet">取消</button><button class="primary-button" type="submit">${e(button)}</button></div>`:''}</form>`;if(!sheet.open)sheet.showModal();requestAnimationFrame(()=>{const input=sheetContent.querySelector('input:not([type=checkbox])');if(input){input.focus();input.select();}});}
 function closeSheet(){sheet.close();formSubmit=null;}
 function confirmSheet(title,text,callback,button='确认'){showSheet(title,`<p>${e(text)}</p>`,async()=>{await callback();return true;},button);}
@@ -103,11 +231,26 @@ async function action(a,node){
  if(a==='sync-cloud'){await ledger.reload();render();toast('已读取当前账户最新的云端记录。');return;}
  if(a==='logout'){confirmSheet('退出当前账户？','云端记录会保留。本页面和当前账户的本机备用副本会清除，下次登录会重新读取云端记录。',async()=>{await ledger.logout();state.itemID=null;state.selection.clear();state.ratioValues=Object.create(null);state.ratioSelected.clear();closeSheet();render();},'退出登录');return;}
  if(a==='close-sheet'){closeSheet();return;}
- if(a==='page'){state.page=node.dataset.page;state.itemID=null;state.keyword='';state.selection.clear();state.selecting=false;state.range=state.page==='history'?3:0;if(state.page==='ratio')loadRatio();history.replaceState(null,'','#'+state.page);render();window.scrollTo({top:0});return;}
- if(a==='book'){state.book=node.dataset.book;state.itemID=null;state.keyword='';state.selection.clear();state.selecting=false;state.ratioPlan=null;state.selectedHour=null;loadRatio();render();return;}
+ if(a==='page'){state.page=node.dataset.page;state.itemID=null;state.eggItemID=null;state.eggSelecting=false;state.eggSelection.clear();state.keyword='';state.selection.clear();state.selecting=false;state.range=state.page==='history'?3:0;if(state.page!=='ratio'&&state.book==='egg')state.book='sales';if(state.page==='ratio')loadRatio();history.replaceState(null,'','#'+state.page);render();window.scrollTo({top:0});return;}
+ if(a==='book'){state.book=node.dataset.book;state.itemID=null;state.eggItemID=null;state.keyword='';state.selection.clear();state.selecting=false;state.ratioPlan=null;state.selectedHour=null;state.eggDraft=null;if(state.book!=='egg')loadRatio();render();return;}
  if(a==='install'){installHelp();return;}
  if(a==='detail'){state.itemID=id;render();window.scrollTo({top:0});return;}
  if(a==='detail-back'){state.itemID=null;render();return;}
+ if(a==='egg-add'){const id=node.dataset.id;state.eggFlash={id,at:Date.now()};await mutateEgg(egg=>C.eggChange(egg,id,1));return;}
+ if(a==='egg-minus'){const id=node.dataset.id;try{await mutateEgg(egg=>C.eggChange(egg,id,-1));}catch(err){toast(err.message);}return;}
+ if(a==='egg-reroll'){const egg=eggBook(),set=C.eggRecommendationSet(egg,4).filter(p=>p.id!==state.eggPick);if(!set.length){toast('现在只有这一个选择。');return;}state.eggPick=set[Math.floor(Math.random()*set.length)].id;render();return;}
+ if(a==='egg-only'){state.eggOnlyLeft=!state.eggOnlyLeft;render();return;}
+ if(a==='egg-arrange'){state.eggArrange=!state.eggArrange;render();return;}
+ if(a==='egg-move'){const id=node.dataset.id,step=node.dataset.step,egg=eggBook(),order=eggOrder(egg),i=order.indexOf(id);const cols=Math.max(1,state.eggCols||1);const delta=step==='cols'?cols:step==='-cols'?-cols:Number(step);const j=i+delta;if(i<0||j<0||j>=order.length){toast('已经到头了。');return;}[order[i],order[j]]=[order[j],order[i]];await mutateEgg(egg=>{egg.order=order;});return;}
+ if(a==='egg-detail'){state.eggItemID=id;state.eggSelecting=false;state.eggSelection.clear();render();window.scrollTo({top:0});return;}
+ if(a==='egg-back'){state.eggItemID=null;state.eggSelecting=false;state.eggSelection.clear();render();window.scrollTo({top:0});return;}
+ if(a==='egg-select'){state.eggSelecting=!state.eggSelecting;state.eggSelection.clear();render();return;}
+ if(a==='egg-select-all'){const egg=eggBook();state.eggSelection=new Set(egg.records.filter(r=>r.itemId===state.eggItemID).map(r=>r.id));render();return;}
+ if(a==='egg-delete-record'||a==='egg-delete-selected'){const ids=a==='egg-delete-record'?new Set([id]):new Set(state.eggSelection);confirmSheet(`删除 ${ids.size} 条记录？`,`数量和本轮进度会同步更新；${'距上次改动'}的计时不会变。`,async()=>{await mutateEgg(egg=>C.eggDeleteRecords(egg,ids));state.eggSelection.clear();},'删除记录');return;}
+ if(a==='egg-add-item'){showSheet('添加放蛋物品',`<label class="field-label" for="name">物品名称</label><input class="field-input" id="name" name="name" maxlength="40" autocomplete="off" placeholder="例如：甲"><label class="field-label" style="margin-top:14px" for="ratio">比例（一轮放几个）</label><input class="field-input" id="ratio" name="ratio" inputmode="numeric" value="1" placeholder="1">`,async fd=>{const name=String(fd.get('name')||''),ratio=C.numberInput(String(fd.get('ratio')||'1'))||1;await mutateEgg(egg=>C.eggAddItem(egg,name,Math.max(1,ratio)));return true;});return;}
+ if(a==='egg-ratio-save'){const egg=eggBook(),draft=state.eggDraft||{};const values={};for(const i of egg.items)values[i.id]=C.numberInput(String(draft[i.id]??i.ratio));for(const [k,v] of Object.entries(values)){if(v<1)throw new Error('比例至少为 1。');}await mutateEgg(egg=>{for(const [id,v] of Object.entries(values))C.eggSetRatio(egg,id,v);egg.goal={mode:'parts',values:Object.fromEntries(Object.entries(values).map(([k,v])=>[k,String(v)]))};});toast('比例已固定，放蛋按新比例排。');return;}
+ if(a==='egg-ratio-reset'){state.eggDraft=null;render();return;}
+ if(a==='change-password'){showSheet('修改密码',`<p>先验证现在的密码，再设置新密码。</p><label class="field-label" for="old">原密码</label><input class="field-input" id="old" name="old" type="password" autocomplete="current-password" required><label class="field-label" style="margin-top:14px" for="new">新密码</label><input class="field-input" id="new" name="new" type="password" autocomplete="new-password" minlength="6" maxlength="128" required><label class="field-label" style="margin-top:14px" for="again">再输一次新密码</label><input class="field-input" id="again" name="again" type="password" autocomplete="new-password" minlength="6" maxlength="128" required>`,async fd=>{const oldValue=String(fd.get('old')||''),newValue=String(fd.get('new')||''),again=String(fd.get('again')||'');if(newValue!==again)throw new Error('两次输入的新密码不一致。');await ledger.changePassword(oldValue,newValue);toast('密码已修改，下次请用新密码登录。');return true;},'修改密码');return;}
  if(a==='edit-count'){itemInput(id);return;}
  if(a==='increase'||a==='decrease'){
   if(a==='decrease'&&state.book==='stock'){const i=book().items.find(x=>x.id===id),c=C.counts(book())[id];if(c-C.partsTotal(i)===0&&c>0){toast('未分类库存为零，请点物品名称，选择要减少的分项。');return;}}
@@ -142,12 +285,37 @@ async function action(a,node){
  if(a==='persist'){const yes=await ledger.requestProtection();toast(yes?'浏览器已允许持久保留；清除网站数据仍会删除记录，请保留备份。':'浏览器暂未授予持久存储权限。自动保存仍有效，请定期导出备份。');render();return;}
  if(a==='copy-report'){try{await navigator.clipboard.writeText(report());toast('今日记数与库存已复制。');}catch{showSheet('今日记数与库存',`<textarea class="field-input" style="height:260px;padding:15px;font-size:12px;line-height:1.7" readonly aria-label="记数与库存汇总">${e(report())}</textarea><p class="hint">可长按内容，全选并复制。</p><button class="primary-button" type="button" data-action="close-sheet">完成</button>`);}return;}
 }
-document.addEventListener('click',event=>{const node=event.target.closest('[data-action]');if(!node)return;if(node.tagName==='BUTTON')event.preventDefault();Promise.resolve(action(node.dataset.action,node)).catch(err=>{if(err.name!=='AbortError'){toast(err.message||'这次操作未完成。');if(ledger.readOnly)render();}});});
+let suppressClick=false,pressTimer=null,pressTarget=null;
+document.addEventListener('pointerdown',event=>{
+ const tab=event.target.closest('.bottom-nav [data-page]');
+ const card=event.target.closest('.egg-card');
+ if(!tab&&!card)return;
+ pressTarget=tab?'tab':'card';
+ pressTimer=setTimeout(()=>{
+  pressTimer=null;suppressClick=true;
+  if(pressTarget==='card'){if(!state.eggArrange){state.eggArrange=true;render();toast('排列模式：用卡片上的方向键调位置，调完点“完成排列”。');}}
+  else{state.tabDrag=tab.dataset.page;nav.classList.add('reordering');}
+ },480);
+},{passive:true});
+document.addEventListener('pointerup',()=>{clearTimeout(pressTimer);pressTimer=null;if(state.tabDrag){state.tabDrag=null;nav.classList.remove('reordering');saveTabs(TABS);render();}});
+document.addEventListener('pointercancel',()=>{clearTimeout(pressTimer);pressTimer=null;if(state.tabDrag){state.tabDrag=null;nav.classList.remove('reordering');saveTabs(TABS);}});
+document.addEventListener('pointermove',event=>{
+ if(pressTimer){const moved=Math.abs(event.movementX)+Math.abs(event.movementY);if(moved>6){clearTimeout(pressTimer);pressTimer=null;}}
+ if(!state.tabDrag)return;
+ const over=document.elementFromPoint(event.clientX,event.clientY)?.closest('.bottom-nav [data-page]');
+ if(!over)return;
+ const target=over.dataset.page,from=TABS.indexOf(state.tabDrag),to=TABS.indexOf(target);
+ if(from<0||to<0||from===to)return;
+ TABS.splice(to,0,TABS.splice(from,1)[0]);
+ render();
+},{passive:true});
+setInterval(()=>{if(!document.hidden&&state.page==='egg'&&ledger.signedIn!==false)eggTick();},1000);
+document.addEventListener('click',event=>{if(suppressClick){suppressClick=false;const node=event.target.closest('[data-action]');if(node){event.preventDefault();event.stopPropagation();return;}}const node=event.target.closest('[data-action]');if(!node)return;if(node.tagName==='BUTTON')event.preventDefault();Promise.resolve(action(node.dataset.action,node)).catch(err=>{if(err.name!=='AbortError'){toast(err.message||'这次操作未完成。');if(ledger.readOnly)render();}});});
 document.addEventListener('submit',async event=>{if(event.target.id!=='account-form')return;event.preventDefault();const form=event.target,button=event.submitter,message=document.querySelector('#account-message'),values=new FormData(form),username=String(values.get('username')||''),password=String(values.get('password')||'');button.disabled=true;message.textContent=state.authMode==='register'?'正在创建账户…':'正在登录…';try{if(state.authMode==='register'){if(password!==values.get('confirm'))throw new Error('两次输入的密码不一致。');await ledger.register(username,password);}else await ledger.login(username,password);}catch(err){if(message.isConnected){message.className='sheet-error';message.textContent=err.message;}}finally{const field=form.querySelector('[name="password"]'),confirm=form.querySelector('[name="confirm"]');if(field)field.value='';if(confirm)confirm.value='';if(button.isConnected)button.disabled=false;}});
 
 document.addEventListener('submit',async event=>{if(event.target.id!=='sheet-form')return;event.preventDefault();if(!formSubmit)return;const submit=event.submitter;if(submit)submit.disabled=true;try{document.querySelector('#sheet-error').textContent='';const done=await formSubmit(new FormData(event.target));if(done)closeSheet();}catch(err){document.querySelector('#sheet-error').textContent=err.message||'没有保存成功，请重试。';}finally{if(submit?.isConnected)submit.disabled=false;}});
-document.addEventListener('change',event=>{const node=event.target;if(node.dataset.record){node.checked?state.selection.add(node.dataset.record):state.selection.delete(node.dataset.record);const actions=main.querySelector('.selection-actions');if(actions){const button=actions.querySelector('.remove');button.textContent=`删除 ${state.selection.size} 条`;button.disabled=!state.selection.size;}return;}if(node.dataset.ratioCheck){const id=node.dataset.ratioCheck;node.checked?state.ratioSelected.add(id):state.ratioSelected.delete(id);if(!Object.hasOwn(state.ratioValues,id))state.ratioValues[id]='1';state.ratioPlan=null;state.ratioError=null;render();return;}if(node.id==='base-select'){state.baseID=node.value;render();}});
-document.addEventListener('input',event=>{const node=event.target;if(node.id==='history-search'){state.keyword=node.value;state.selection.clear();document.querySelector('#history-list').innerHTML=historyRows(filteredRecords());document.querySelector('#history-count').textContent=`${filteredRecords().length} 条记录`;return;}if(node.dataset.ratioValue){state.ratioValues[node.dataset.ratioValue]=node.value;state.ratioPlan=null;state.ratioError=null;}});
+document.addEventListener('change',event=>{const node=event.target;if(node.dataset.eggRecord){node.checked?state.eggSelection.add(node.dataset.eggRecord):state.eggSelection.delete(node.dataset.eggRecord);const actions=main.querySelector('.selection-actions');if(actions){const button=actions.querySelector('.remove');button.textContent=`删除 ${state.eggSelection.size} 条`;button.disabled=!state.eggSelection.size;}return;}if(node.dataset.record){node.checked?state.selection.add(node.dataset.record):state.selection.delete(node.dataset.record);const actions=main.querySelector('.selection-actions');if(actions){const button=actions.querySelector('.remove');button.textContent=`删除 ${state.selection.size} 条`;button.disabled=!state.selection.size;}return;}if(node.dataset.ratioCheck){const id=node.dataset.ratioCheck;node.checked?state.ratioSelected.add(id):state.ratioSelected.delete(id);if(!Object.hasOwn(state.ratioValues,id))state.ratioValues[id]='1';state.ratioPlan=null;state.ratioError=null;render();return;}if(node.id==='base-select'){state.baseID=node.value;render();}});
+document.addEventListener('input',event=>{const node=event.target;if(node.dataset.eggRatio){if(!state.eggDraft)state.eggDraft={};state.eggDraft[node.dataset.eggRatio]=node.value;return;}if(node.id==='history-search'){state.keyword=node.value;state.selection.clear();document.querySelector('#history-list').innerHTML=historyRows(filteredRecords());document.querySelector('#history-count').textContent=`${filteredRecords().length} 条记录`;return;}if(node.dataset.ratioValue){state.ratioValues[node.dataset.ratioValue]=node.value;state.ratioPlan=null;state.ratioError=null;}});
 fileInput.addEventListener('change',async()=>{const file=fileInput.files?.[0];if(!file)return;try{if(file.size>20*1024*1024)throw new Error('备份不能超过 20 MB。');const text=await file.text();if(restoreExpected==='all'){
  const next=C.validateState(JSON.parse(text));backupReady=next;const n=next.sales.records.length+next.stock.records.length;
  confirmSheet('恢复全部记录？',`备份包含两个账本，共 ${n} 条记录。会替换本机的全部记数和库存，原本机记录会另存为恢复副本。`,async()=>{await ledger.restoreState(backupReady);backupReady=null;state.itemID=null;loadRatio();render();toast('全部记录已恢复。');},'恢复两个账本');

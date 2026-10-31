@@ -92,6 +92,120 @@ export function decodeBackup(text,expected){
  const book={book:b.book,items:b.items.map(i=>({...i,color:i.color??0,breakdown:i.breakdown??{}})),records:b.records.map(r=>({...r,kind:r.kind??'count'})),goal:b.goal&&Object.keys(b.goal.values??{}).length?{mode:b.goal.mode,values:Object.fromEntries(Object.entries(b.goal.values).map(([k,v])=>[k,String(v)]))}:null};
  return validateBook(book);
 }
+// ---------------------------------------------------------------------------
+// 放蛋：按比例排产的点数账本。
+// 每个物品有一个比例（份数），每轮要求各拿满 ratio 个；多出来的自动计入下一轮。
+// 推荐用“理想进度差额”排队：谁落后最多先给谁，天然把占比小的物品拉得更开。
+// ---------------------------------------------------------------------------
+export const EGG_ZONE = ZONE;
+export function emptyEgg(){return {book:'egg',items:[],records:[],goal:null};}
+export function ensureEgg(state){
+ if(!state||typeof state!=='object')return emptyEgg();
+ if(!state.egg||typeof state.egg!=='object')state.egg=emptyEgg();
+ const egg=state.egg;
+ if(!Array.isArray(egg.items))egg.items=[];
+ if(!Array.isArray(egg.records))egg.records=[];
+ if(!('goal' in egg))egg.goal=null;
+ return egg;
+}
+export function validateEgg(egg){
+ requireThat(egg&&egg.book==='egg'&&Array.isArray(egg.items)&&Array.isArray(egg.records),'放蛋账本格式不正确。');
+ requireThat(egg.items.length<=200&&egg.records.length<=200000,'物品或记录超过上限。');
+ const ids=new Set(),labels=new Set(),recordIDs=new Set();
+ for(const i of egg.items){
+  requireThat(i&&validID(i.id)&&!ids.has(i.id)&&typeof i.name==='string'&&i.name.trim().length>0&&i.name.length<=40&&!labels.has(i.name)&&validTime(i.created)&&Number.isSafeInteger(i.color),'放蛋物品数据无效，或名称／编号重复。');
+  ids.add(i.id);labels.add(i.name);
+  requireThat(Number.isSafeInteger(i.ratio)&&i.ratio>=1&&i.ratio<=1000000,'每个物品的比例须为 1 至 1000000 的整数。');
+ }
+ for(const r of egg.records){requireThat(r&&validID(r.id)&&!recordIDs.has(r.id)&&ids.has(r.itemId)&&Number.isSafeInteger(r.delta)&&Math.abs(r.delta)<=MAX&&validTime(r.at)&&['count','set'].includes(r.kind),'放蛋记录无效。');recordIDs.add(r.id);}
+ const values=eggCounts(egg);
+ for(const i of egg.items)requireThat(values[i.id]>=0&&values[i.id]<=MAX&&Number.isSafeInteger(values[i.id]),'放蛋数量不能为负或超过上限。');
+ return egg;
+}
+export function eggCounts(egg){const result=Object.fromEntries(egg.items.map(i=>[i.id,0]));for(const r of egg.records)result[r.itemId]=(result[r.itemId]||0)+r.delta;return result;}
+export function eggRound(egg){
+ const participating=egg.items.filter(i=>Number(i.ratio)>0);
+ if(!participating.length)return 0;
+ const c=eggCounts(egg);
+ return Math.min(...participating.map(i=>Math.floor(c[i.id]/i.ratio)));
+}
+export function eggProgress(egg){
+ const c=eggCounts(egg),round=eggRound(egg);
+ return egg.items.map(i=>({id:i.id,name:i.name,ratio:i.ratio,count:c[i.id],round,progress:c[i.id]-round*i.ratio,left:Math.max(0,i.ratio-(c[i.id]-round*i.ratio)),target:i.ratio}));
+}
+export function eggRoundComplete(egg){return eggProgress(egg).every(p=>p.left===0);}
+export function eggLastPlaced(egg){const sorted=egg.records.slice().sort((a,b)=>a.at-b.at);return sorted.length?sorted[sorted.length-1].itemId:null;}
+export function eggLastChange(egg,itemId){
+ const item=egg.items.find(i=>i.id===itemId);
+ if(item&&validTime(item.lastAt))return item.lastAt;
+ for(let k=egg.records.length-1;k>=0;k--){const r=egg.records[k];if(r.itemId===itemId&&r.kind!=='delete')return r.at;}
+ return 0;
+}
+export function eggAddItem(egg,name,ratio=1){
+ name=String(name??'').trim();
+ requireThat(name.length>0&&name.length<=40&&!egg.items.some(i=>i.name===name)&&egg.items.length<200,'请输入不重复的名称，最多 40 字、200 个物品。');
+ requireThat(Number.isSafeInteger(ratio)&&ratio>=1&&ratio<=1000000,'比例须为 1 至 1000000 的整数。');
+ egg.items.push({id:uid(),name,color:egg.items.length,created:Date.now(),ratio,lastAt:Date.now()});
+}
+export function eggSetRatio(egg,id,ratio){
+ const item=egg.items.find(i=>i.id===id);
+ requireThat(item&&Number.isSafeInteger(ratio)&&ratio>=1&&ratio<=1000000,'比例须为 1 至 1000000 的整数。');
+ item.ratio=ratio;
+}
+export function eggSetCount(egg,id,value){
+ const item=egg.items.find(i=>i.id===id);
+ requireThat(item&&Number.isSafeInteger(value)&&value>=0&&value<=MAX,'数量不能为负或超过上限。');
+ const delta=value-eggCounts(egg)[id];if(delta===0)return;
+ requireThat(egg.records.length<200000,'记录已达上限，请先导出备份。');
+ egg.records.push({id:uid(),itemId:id,delta,at:Date.now(),kind:'set'});
+ item.lastAt=Date.now();
+}
+export function eggChange(egg,id,delta){
+ requireThat(delta===1||delta===-1,'加减步长无效。');
+ const item=egg.items.find(i=>i.id===id);
+ requireThat(item&&eggCounts(egg)[id]+delta>=0,'数量不能为负。');
+ egg.records.push({id:uid(),itemId:id,delta,at:Date.now(),kind:'count'});
+ item.lastAt=Date.now();
+}
+export function eggDeleteRecords(egg,ids){
+ const next={...egg,records:egg.records.filter(r=>!ids.has(r.id))};
+ const values=eggCounts(next);
+ for(const i of next.items)requireThat(values[i.id]>=0,'会删成负数，已取消这次删除。');
+ egg.records=next.records;
+}
+export function eggDeleteItem(egg,id){
+ egg.items=egg.items.filter(i=>i.id!==id);
+ egg.records=egg.records.filter(r=>r.itemId!==id);
+ if(egg.goal&&Object.keys(egg.goal.values||{}).includes(id))egg.goal=null;
+}
+// 推荐下一个放什么：理想进度差额最大者优先；占比越小，间隔时间越长。
+// jitter 用于“换一个”，exclude 用来避免连续重复。
+export function eggRecommend(egg,{jitter=0,random=Math.random,excludeLast=true}={}){
+ const items=egg.items.filter(i=>Number(i.ratio)>0);
+ if(!items.length)return null;
+ const c=eggCounts(egg),totalRatio=sum(items.map(i=>i.ratio)),placed=sum(items.map(i=>c[i.id]));
+ const last=eggLastPlaced(egg);
+ const scored=items.map(i=>{
+  const ideal=(placed+1)*i.ratio/totalRatio;
+  const deficit=ideal-c[i.id];
+  return {id:i.id,name:i.name,ratio:i.ratio,deficit,score:deficit+(random()-0.5)*jitter};
+ });
+ scored.sort((a,b)=>b.score-a.score);
+ let pick=scored[0];
+ if(excludeLast&&last&&pick.id===last&&scored.length>1&&pick.deficit<1){pick=scored[1];}
+ return {id:pick.id,name:pick.name,ratio:pick.ratio,deficit:pick.deficit,
+  reason:pick.deficit>0.5?'落后进度较多':'按比例轮转',round:eggRound(egg)};
+}
+export function eggRecommendationSet(egg,count=4,random=Math.random){
+ const out=[],seen=new Set(),copy={book:'egg',items:egg.items,records:egg.records.slice(),goal:egg.goal};
+ for(let k=0;k<count;k++){
+  const pick=eggRecommend(copy,{jitter:0.9,random});
+  if(!pick||seen.has(pick.id))break;
+  seen.add(pick.id);out.push(pick);
+  copy.records.push({id:'probe-'+k,itemId:pick.id,delta:1,at:Date.now(),kind:'count'});
+ }
+ return out;
+}
 export class LocalLedger {
  constructor(storage,key='little-tally-pocket-v1') {this.storage=storage;this.key=key;this.state=initialState();this.raw=null;this.readOnly=false;this.error=null;this.reload();}
  reload(){try{const raw=this.storage.getItem(this.key);if(raw!==null){this.state=validateState(JSON.parse(raw));this.raw=raw;}else{this.raw=null;}this.readOnly=false;this.error=null;}catch(e){this.readOnly=true;this.error='本地记录未能读取，原文件没有被覆盖。请先导出原文件，再从备份恢复。';}return !this.readOnly;}
