@@ -166,3 +166,28 @@ body.egg-screen main{height:calc(100dvh - var(--nav-h,64px) - 8px)}
 .egg-toolbar .ghost{background:#fff;border:1px solid #e2e7e0;color:#3b4a42}
 .egg-toolbar .ghost.on{background:#e8f0e3;border-color:#bfd4c4;color:#2c5740}
 @media(max-width:380px){.egg-card{min-height:104px}.egg-count{font-size:clamp(18px,6.4vw,32px)}}
+/* ---------------- 卡片随窗口伸缩：容器查询 ---------------- */
+.egg-grid{grid-auto-rows:minmax(96px,1fr);align-content:stretch}
+.egg-card{container-type:size;container-name:egg;min-height:0;overflow:hidden}
+.egg-count{font-size:clamp(15px,23cqw,44px)}
+.egg-name{font-size:clamp(9px,4.6cqw,13px)}
+.egg-round{font-size:clamp(8px,4cqw,11px)}
+.egg-timer{font-size:clamp(8px,3.8cqw,11px)}
+.egg-progress{height:clamp(5px,3.2cqw,9px)}
+.egg-plus,.egg-minus{min-width:clamp(32px,20cqw,48px);height:clamp(26px,15cqh,40px);font-size:clamp(11px,5.4cqw,15px);padding:0 6px}
+.egg-card .egg-open{gap:1px}
+@container egg (max-height: 92px){.egg-timer{display:none}}
+@container egg (max-height: 78px){.egg-head{display:none}}
+@container egg (max-width: 120px){.egg-round{display:none}}
+/* ---------------- 不滚动：行数等分，内容按卡片高度缩放 ---------------- */
+.egg-grid{grid-template-rows:repeat(var(--egg-rows,2),minmax(0,1fr));grid-auto-rows:auto;overflow:hidden;align-content:stretch}
+.egg-card{padding:4px 6px;gap:2px;overflow:hidden;min-height:0}
+.egg-name{font-size:clamp(9px,11cqh,13px)}
+.egg-round{font-size:clamp(8px,9cqh,11px)}
+.egg-count{font-size:clamp(13px,38cqh,42px);line-height:1}
+.egg-progress{height:clamp(3px,5cqh,8px)}
+.egg-timer{font-size:clamp(8px,9cqh,11px)}
+.egg-plus,.egg-minus{height:clamp(20px,26cqh,38px);min-width:clamp(30px,18cqw,46px);font-size:clamp(10px,10cqh,15px);padding:0 4px}
+@container egg (max-height: 104px){.egg-timer{display:none}}
+@container egg (max-height: 84px){.egg-round{display:none}}
+@container egg (max-width: 108px){.egg-round{display:none}}

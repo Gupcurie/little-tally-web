@@ -281,10 +281,12 @@ function fitEggGrid(){
  const count=grid.children.length;if(!count)return;
  const width=grid.clientWidth;if(!width)return;
  const gap=parseFloat(getComputedStyle(grid).gap)||8;
- const min=142;
+ const min=132;
  let columns=Math.max(1,Math.min(6,Math.floor((width+gap)/(min+gap))));
  columns=Math.min(columns,count);
+ const rows=Math.ceil(count/columns);
  grid.style.setProperty('--egg-columns',columns);
+ grid.style.setProperty('--egg-rows',rows);
  state.eggCols=columns;
 }
 function eggTick(){
