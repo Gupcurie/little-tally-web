@@ -383,24 +383,28 @@ body.center {
 .msg { min-height: 20px; margin: 10px 0 0; font-size: 13px; color: var(--warn); }
 
 /* ---------- small screens ---------- */
-@media (max-width: 720px) {
+@media (max-width: 760px) {
   .table-head { display: none; }
 
   .row {
-    grid-template-columns: 1fr auto;
+    grid-template-columns: minmax(0, 1fr) max-content;
     grid-template-areas:
       "who status"
       "usage usage"
-      "login actions";
+      "activity activity"
+      "actions actions";
     gap: 6px 10px;
     padding: 12px 4px;
   }
 
-  .row .who { grid-area: who; }
-  .row .pill { grid-area: status; align-self: start; }
+  .row .who { grid-area: who; min-width: 0; align-items: flex-start; }
+  .row .namebox { flex: 1; min-width: 0; }
+  .row .pick { flex: 0 0 18px; margin-top: 3px; }
+  .row .pill { grid-area: status; align-self: start; white-space: nowrap; }
   .row .usage { grid-area: usage; }
-  .row .cell.muted { grid-area: login; }
-  .row .actions { grid-area: actions; justify-content: flex-end; }
+  .row .cell.muted, .row .activity { grid-area: activity; }
+  .row .actions { grid-area: actions; justify-content: flex-start; min-width: 0; }
+  .row .actions button { flex: 0 0 auto; white-space: nowrap; }
 
   .audit-line { grid-template-columns: 1fr; gap: 2px; }
   .modal-box { border-radius: 18px 18px 0 0; }
@@ -429,9 +433,9 @@ body.center {
 .change-badge.data{background:#fff0cc;color:#865f12}
 .change-badge.sync{background:#eaf7ef;color:#287c52}
 #changes{margin:0 0 16px}
-@media(max-width:760px){.row .activity{grid-area:login}.top{align-items:flex-start;gap:12px;flex-wrap:wrap}.top-actions{gap:6px}.modal-head{gap:10px;align-items:flex-start;flex-wrap:wrap}.primary-refresh{padding:9px 10px;font-size:12px}}
+@media(max-width:760px){.top{align-items:flex-start;gap:12px;flex-wrap:wrap}.top-actions{gap:6px}.modal-head{gap:10px;align-items:flex-start;flex-wrap:wrap}.primary-refresh{padding:9px 10px;font-size:12px}}
 
-.pin-marker{display:inline-block;align-self:flex-start;color:#b92543;background:#fce3ea;border-radius:6px;padding:2px 6px;font-size:10px}
+.pin-marker{display:inline-block;align-self:flex-start;color:#b92543;background:#fce3ea;border-radius:6px;padding:2px 6px;font-size:10px;white-space:nowrap}
 .pin-action.is-pinned{border-color:#e7a3b4;background:#fff0f4;color:#b92543}
 .account-pinned .namebox strong{color:#b92543}
 .account-order-hint{margin:0 0 12px}
