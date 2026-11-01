@@ -348,7 +348,7 @@ function eggView(){
  const shown=state.eggOnlyLeft?ids.filter(id=>byId[id].left>0):ids;
  const pickId=eggPickId(egg),pick=pickId?byId[pickId]:null,round=C.eggRound(egg)+1;
  return `<section class="egg-wrap">
-  <div class="egg-statusbar"><img class="egg-mark" src="./icon-192.png" alt="火星演唱会标志"><div class="egg-status"><span data-testid="egg-round">第 <strong>${round}</strong> 轮</span><span data-testid="egg-total">总数 <strong>${fmt(C.eggTotal(egg))}</strong> 个</span></div><button class="small-button egg-tools" data-action="${state.eggArrange?'egg-arrange':'egg-tools'}">${state.eggArrange?'完成':icon('settings')+'操作'}</button></div>
+  <div class="egg-statusbar"><img class="egg-mark" src="./icon-192.png" alt="火星演唱会标志"><div class="egg-status"><span data-testid="egg-round">第 <strong>${round}</strong> 轮</span><span data-testid="egg-total">总数 <strong>${fmt(C.eggTotal(egg))}</strong> 个</span></div><div class="egg-header-actions"><button class="small-button egg-copy" data-action="egg-copy">一键复制</button><button class="small-button egg-tools" data-action="${state.eggArrange?'egg-arrange':'egg-tools'}">${state.eggArrange?'完成':icon('settings')+'操作'}</button></div></div>
   <div class="egg-reco"><button class="egg-reco-main" data-action="egg-plan" aria-label="查看本轮推荐顺序"><span class="eyebrow">${state.eggPick?.alternative?'备选':'推荐'}</span><strong>${pick?e(pick.name):'—'}</strong>${icon('arrow','tiny')}</button><div class="egg-reco-actions">${pick?`<button class="egg-add-main" data-action="egg-add" data-id="${e(pick.id)}">+1</button>`:''}<button class="ghost small" data-action="egg-reroll">换一个</button></div></div>
   <div class="egg-grid" data-columns="${state.eggCols}">${shown.length?shown.map(id=>eggCard(byId[id],egg)).join(''):`<p class="egg-none">没有未放满的物品。<button class="small-button" data-action="egg-only">显示全部</button></p>`}</div>
  </section>`;
@@ -434,6 +434,18 @@ function draftGoal(){return {mode:state.ratioMode,values:Object.fromEntries([...
 async function saveDownload(content,name){const blob=new Blob([content],{type:'application/json'}),file=new File([blob],name,{type:'application/json'});if(navigator.canShare?.({files:[file]})){await navigator.share({files:[file],title:'拆弹专家备份'});return;}const url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download=name;document.body.append(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),60000);}
 function backupFilename(label){return `拆弹专家-${label}-${C.day(Date.now())}-${Date.now()}.json`;}
 function report(){const sales=ledger.state.sales,stock=ledger.state.stock,t=C.counts({...sales,records:C.todayRecords(sales)}),s=C.counts(stock);return `拆弹专家｜${C.day(Date.now())}\n\n【今天的记数】\n${sales.items.map(i=>`${i.name}：${t[i.id]} 件`).join('\n')}\n\n【当前库存数】\n${stock.items.map(i=>`${i.name}：${s[i.id]} 件`).join('\n')}\n\n时间使用北京时间，销售与库存独立。`;}
+function eggReport(egg=eggBook()){
+ const progress=C.eggProgress(egg),round=C.eggRound(egg)+1;
+ return `拆弹专家｜放蛋统计\n统计时间：${C.clock(Date.now(),true)}\n当前第 ${round} 轮｜累计总数 ${fmt(C.eggTotal(egg))} 个\n共 ${egg.items.length} 个品类\n\n${progress.map(p=>`${p.name}：累计 ${fmt(p.count)} 个｜本轮 ${fmt(p.progress)}/${fmt(p.ratio)}${p.overflow?'｜超出 '+fmt(p.overflow)+' 个':''}`).join('\n')||'暂无物品'}`;
+}
+async function copyEggReport(){
+ const text=eggReport();
+ try{await navigator.clipboard.writeText(text);toast('所有品类的放蛋统计已复制。');}
+ catch{
+  showSheet('复制放蛋统计',`<textarea class="field-input egg-copy-text" readonly aria-label="所有品类的放蛋统计">${e(text)}</textarea><p class="hint">自动复制未成功，可长按内容全选并复制。</p><button class="primary-button" type="button" data-action="close-sheet">完成</button>`);
+  requestAnimationFrame(()=>{const field=sheetContent.querySelector('.egg-copy-text');field?.focus();field?.select();});
+ }
+}
 function installHelp(){const isIOS=/iPad|iPhone|iPod/.test(navigator.userAgent);showSheet('把拆弹专家放进口袋',`<p>添加到主屏幕后，就能像 App 一样从图标打开。</p><ol class="install-steps"><li>${isIOS?'请用 Safari 打开这个网页。':'在手机浏览器中打开这个网页。'}</li><li>${isIOS?'点击浏览器的“分享”按钮。':'打开浏览器菜单，选择“安装应用”或“添加到主屏幕”。'}</li><li>${isIOS?'选择“添加到主屏幕”，如有“作为网页 App 打开”请开启。':'确认名称为“拆弹专家”，完成添加。'}</li></ol><div class="soft-message">建议先添加再正式记数，并固定使用同一个入口。如果已有记录，请先在设置里导出备份，再在主屏幕版导入。</div><button class="primary-button" type="button" data-action="close-sheet">知道了</button>`);}
 async function action(a,node){
  if(sheet.open&&['page','egg-arrange','egg-only'].includes(a))closeSheet();
@@ -449,6 +461,7 @@ async function action(a,node){
  if(a==='install'){installHelp();return;}
  if(a==='detail'){state.itemID=id;render();window.scrollTo({top:0});return;}
  if(a==='detail-back'){state.itemID=null;render();return;}
+ if(a==='egg-copy'){await copyEggReport();return;}
  if(a==='egg-tools'){showSheet('放蛋操作',`<button class="list-button" type="button" data-action="egg-add-item">${icon('plus')}<span>添加物品</span>${icon('arrow','chevron')}</button><button class="list-button" type="button" data-action="page" data-page="ratio" data-book="egg">${icon('ratio')}<span>设置比例</span>${icon('arrow','chevron')}</button><button class="list-button" type="button" data-action="egg-arrange">${icon('count')}<span>排列卡片</span>${icon('arrow','chevron')}</button><button class="list-button" type="button" data-action="egg-only">${icon('target')}<span>${state.eggOnlyLeft?'显示全部物品':'只看本轮还缺的'}</span>${icon('arrow','chevron')}</button>`);return;}
  if(a==='egg-add'){const id=node.dataset.id;await mutateEgg(egg=>C.eggChange(egg,id,1),{placedId:id});return;}
  if(a==='egg-minus'){const id=node.dataset.id;try{await mutateEgg(egg=>C.eggChange(egg,id,-1));}catch(err){toast(err.message);}return;}

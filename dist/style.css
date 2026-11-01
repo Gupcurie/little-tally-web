@@ -54,7 +54,7 @@ body.count-screen,body.egg-screen{height:100dvh;overflow:hidden}
 .egg-reco-actions{display:flex;align-items:center;gap:7px;flex:none}.egg-add-main{background:#fff;color:var(--green);min-width:48px;height:38px;border-radius:9px;font-size:18px;font-weight:750;padding:0 10px}.egg-reco .ghost{background:transparent;border:1px solid #ffffff66;color:#fff;min-height:38px;padding:5px 9px;font-size:11px}
 .egg-grid{flex:1;min-height:0;min-width:0;display:grid;grid-template-columns:repeat(var(--egg-columns,2),minmax(0,1fr));grid-template-rows:repeat(var(--egg-rows,2),minmax(0,1fr));gap:6px;overflow:hidden;align-content:stretch}
 .egg-card{background:var(--white);border:1px solid var(--line);border-radius:13px;padding:7px;display:flex;flex-direction:column;gap:4px;min-height:0;min-width:0;overflow:hidden;container-type:size;container-name:egg}
-.egg-card.flash{border-color:var(--green);background:#ffe3eb;box-shadow:inset 0 0 0 1px var(--green)}
+.egg-card.flash{border-color:var(--green);background:#ffe3eb;box-shadow:inset 0 0 0 2px var(--green)}
 .egg-open{flex:1;min-height:0;min-width:0;display:flex;flex-direction:column;align-items:flex-start;justify-content:center;gap:4px;width:100%;padding:0;background:none;text-align:left;overflow:hidden}
 .egg-head{display:flex;align-items:baseline;justify-content:space-between;gap:5px;min-width:0;width:100%}.egg-name{font-size:clamp(11px,10cqh,14px);line-height:1.25;font-weight:600;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.egg-round{font-size:10px;color:var(--muted);flex:none;white-space:nowrap}
 .egg-count{font-size:clamp(23px,29cqh,52px);font-weight:700;line-height:1;letter-spacing:-.04em;font-variant-numeric:tabular-nums;max-width:100%;overflow:hidden;text-overflow:ellipsis}
@@ -104,8 +104,8 @@ body.count-screen,body.egg-screen{height:100dvh;overflow:hidden}
 @media(prefers-reduced-motion:reduce){.egg-reco.reco-updated,.egg-reco.reco-updated:after{animation:none!important}}
 
 /* Current recommendation mirrors the last-placement outline in green. */
-.egg-card.recommended{border-color:#298b5d;background:#eefaf3;box-shadow:inset 0 0 0 1px #298b5d}
-.egg-card.flash.recommended{background:#fff0f3;box-shadow:inset 0 0 0 1px #298b5d,inset 0 0 0 3px #df8296}
+.egg-card.recommended{border-color:#8ad6a7;background:#eefaf3;box-shadow:inset 0 0 0 2px #8ad6a7}
+.egg-card.flash.recommended{background:#fff0f3;box-shadow:inset 0 0 0 2px #8ad6a7,inset 0 0 0 5px var(--green)}
 button.egg-reco-main{align-self:stretch;text-align:left;background:transparent;color:inherit;padding:0;cursor:pointer;border-radius:9px;min-height:36px}
 .egg-reco-main>.icon{flex:none;width:13px;height:13px;opacity:.7}
 .egg-reco-main:focus-visible{outline:2px solid #fff;outline-offset:3px}
@@ -133,3 +133,9 @@ button.egg-reco-main{align-self:stretch;text-align:left;background:transparent;c
 .egg-progress-stack.big .egg-overflow{height:5px}
 .egg-stat-item>.egg-overflow{margin-top:3px}
 .egg-plan-limit{color:#916b17;background:#fff8df;border-radius:9px;padding:9px 11px}
+
+.egg-statusbar{gap:6px}
+.egg-header-actions{display:flex;gap:5px;align-items:center;flex:none}
+.egg-copy{min-height:36px;padding:6px 10px;font-size:11px;white-space:nowrap}
+.egg-copy-text{height:260px;padding:14px;font-size:12px;line-height:1.8;resize:vertical}
+@media(max-width:480px){.egg-status{flex-direction:column;align-items:flex-start;gap:2px;font-size:10px;line-height:1}.egg-status strong{font-size:15px}.egg-header-actions .small-button{min-height:32px;padding:6px 7px;font-size:11px}}
