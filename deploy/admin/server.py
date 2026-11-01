@@ -256,6 +256,32 @@ def export_csv(username, payload):
     return '\ufeff' + out.getvalue()
 
 
+def account_activity(payload):
+    """Read-only signals; recommendation-only saves do not count as ledger changes."""
+    payload = payload if isinstance(payload, dict) else {}
+    stable = {k: v for k, v in payload.items() if k != 'revision'}
+    egg = payload.get('egg') if isinstance(payload.get('egg'), dict) else {}
+    if egg:
+        stable['egg'] = {k: v for k, v in egg.items() if k != 'recommendation'}
+    plan = egg.get('recommendation') if isinstance(egg.get('recommendation'), dict) else {}
+    totals = item_totals(egg)
+    key = json.dumps([[[i.get('id'), i.get('ratio'), totals.get(i.get('id'), 0)]
+                       for i in egg.get('items', [])],
+                      [r.get('id') for r in egg.get('records', [])[-16:]]],
+                     ensure_ascii=False, separators=(',', ':'))
+    synced = plan.get('version') in (1, 2) and plan.get('key') == key
+    times = [r.get('at') for name in BOOK_LABELS
+             for r in (payload.get(name) or {}).get('records', [])
+             if isinstance(r, dict) and isinstance(r.get('at'), (int, float))]
+    return {
+        'data_fingerprint': hashlib.sha256(json.dumps(stable, ensure_ascii=False, sort_keys=True,
+                                                     separators=(',', ':')).encode()).hexdigest(),
+        'latest_record_at': max(times, default=0),
+        'recommendation_version': plan.get('version') if synced else None,
+        'recommendation_synced_at': plan.get('at') if synced else None,
+    }
+
+
 def fetch_accounts():
     users = []
     page = 1
@@ -271,9 +297,10 @@ def fetch_accounts():
 
     status, rows = supabase('/rest/v1/tally_ledgers?select=user_id,revision,updated_at,payload')
     ledgers = {}
-    if status == 200 and isinstance(rows, list):
-        for row in rows:
-            ledgers[row.get('user_id')] = row
+    if status != 200 or not isinstance(rows, list):
+        raise RuntimeError('ledger list failed: %s' % status)
+    for row in rows:
+        ledgers[row.get('user_id')] = row
 
     accounts = []
     for user in users:
@@ -293,6 +320,7 @@ def fetch_accounts():
             'books': stats,
             'items': sum(v['items'] for v in stats.values()) if stats else 0,
             'records': sum(v['records'] for v in stats.values()) if stats else 0,
+            **account_activity((row or {}).get('payload')),
         })
     accounts.sort(key=lambda a: (a['username'] or '~'))
     return accounts

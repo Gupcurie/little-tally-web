@@ -41,6 +41,34 @@ class Handler:
     def _json(self, status, data): self.response = (status, data)
 
 class AdminBooksTest(unittest.TestCase):
+    def test_activity_ignores_recommendation_only_saves_and_detects_real_ledger_edits(self):
+        current = payload()
+        first = admin.account_activity(current)
+        current['revision'] = 999
+        current['egg']['recommendation'] = {'version': 2, 'at': 1793490000000, 'key': 'old'}
+        metadata = admin.account_activity(current)
+        self.assertEqual(first['data_fingerprint'], metadata['data_fingerprint'])
+        current['egg']['records'][0]['delta'] += 1
+        changed = admin.account_activity(current)
+        self.assertNotEqual(first['data_fingerprint'], changed['data_fingerprint'])
+        self.assertEqual(changed['recommendation_version'], None)
+        self.assertEqual(changed['latest_record_at'], 1793469600002)
+
+    def test_activity_recognizes_matching_plan_keys_and_reports_sync_time(self):
+        current = payload()
+        egg = current['egg']
+        import json
+        key = json.dumps([[['item', 2, 5]], [None, None, None]], separators=(',', ':'))
+        egg['recommendation'] = {'version': 2, 'at': 1793490000000, 'key': key}
+        activity = admin.account_activity(current)
+        self.assertEqual(activity['recommendation_version'], 2)
+        self.assertEqual(activity['recommendation_synced_at'], 1793490000000)
+
+    def test_ledger_fetch_failure_is_not_reported_as_all_accounts_being_empty(self):
+        with patch.object(admin, 'supabase', side_effect=[(200, {'users': [{'id': A}]}), (503, None)]):
+            with self.assertRaises(RuntimeError):
+                admin.fetch_accounts()
+
     def test_recommendation_endpoint_requires_admin_session_and_returns_only_the_requested_egg(self):
         handler = Handler(authenticated=False)
         handler.path = '/admin/api/accounts/' + A + '/recommendation'

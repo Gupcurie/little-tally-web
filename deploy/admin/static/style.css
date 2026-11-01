@@ -417,3 +417,16 @@ body.center {
 .recommendation-order li:last-child{border-bottom:0}
 .recommendation-order li span{width:68px;flex:none;font-size:12px}
 .recommendation-order li strong{min-width:0;overflow-wrap:anywhere}
+
+.top-actions,.live-toolbar{display:flex;align-items:center;gap:9px;flex-wrap:wrap}
+.top-actions{justify-content:flex-end}
+.live-toolbar{justify-content:space-between;margin:0 0 8px}
+.live-toolbar p{margin:0}
+.primary-refresh{background:#d92f4b;color:#fff;border:1px solid #d92f4b;border-radius:10px;padding:10px 13px;font-weight:600;cursor:pointer}
+.primary-refresh:disabled{opacity:.6;cursor:wait}
+.activity{display:flex;flex-direction:column;gap:4px;font-size:12px;overflow-wrap:anywhere}
+.change-badge{display:inline-block;align-self:flex-start;border-radius:7px;padding:3px 6px;font-size:11px}
+.change-badge.data{background:#fff0cc;color:#865f12}
+.change-badge.sync{background:#eaf7ef;color:#287c52}
+#changes{margin:0 0 16px}
+@media(max-width:760px){.row .activity{grid-area:login}.top{align-items:flex-start;gap:12px;flex-wrap:wrap}.top-actions{gap:6px}.modal-head{gap:10px;align-items:flex-start;flex-wrap:wrap}.primary-refresh{padding:9px 10px;font-size:12px}}

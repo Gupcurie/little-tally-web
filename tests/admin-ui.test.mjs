@@ -18,15 +18,16 @@ async function loadPage({missingUpdated=false,failApi=false,recommendation=null}
  if(missingUpdated)delete nodes.updated;
  const account={id:'00000000-0000-4000-8000-000000000001',username:'test-account',items:11,records:2,revision:3,created_at:'2026-11-01T00:00:00Z',last_sign_in_at:null,
   books:{sales:{items:9,records:0,lines:[]},stock:{items:0,records:0,lines:[]},egg:{items:2,records:2,total:2,round:1,lines:[{name:'放蛋奖品',total:2,ratio:1}]}}};
- const context=vm.createContext({document:{getElementById:id=>nodes[id]||null,createElement:()=>new Element(),cookie:''},window:{location:{href:''}},Date,Set,setTimeout,fetch:async url=>{
+ const timers=[];nodes['auto-refresh'].checked=true;
+ const context=vm.createContext({document:{getElementById:id=>nodes[id]||null,createElement:()=>new Element(),cookie:'',visibilityState:'visible',addEventListener:()=>{}},window:{location:{href:''}},Date,Set,setTimeout,setInterval:fn=>{timers.push(fn);return 1;},fetch:async url=>{
   if(failApi&&url.endsWith('/accounts'))return {status:503,ok:false,json:async()=>({error:'BACKEND_UNAVAILABLE'})};
-  return {status:200,ok:true,json:async()=>url.endsWith('/recommendation')?{egg:recommendation}:url.endsWith('/audit')?{entries:[]}:{accounts:[account],summary:{total:1,active:1,banned:0,with_ledger:1,items:11,records:2,signed_in_7d:1},generated_at:1793491200}};
+  return {status:200,ok:true,json:async()=>url.endsWith('/recommendation')?{egg:recommendation}:url.endsWith('/audit')?{entries:[]}:{accounts:[JSON.parse(JSON.stringify(account))],summary:{total:1,active:1,banned:0,with_ledger:1,items:11,records:2,signed_in_7d:1},generated_at:1793491200}};
  }});
  // Run real event wiring, fetch, summary rendering and row rendering from the shipped script.
  const withoutAutoLoad=script.replace(/\nload\(\);\s*$/,'');
  vm.runInContext(withoutAutoLoad,context);
  await vm.runInContext('load()',context);
- Object.defineProperty(nodes,'context',{value:context});
+ Object.defineProperty(nodes,'context',{value:context});Object.defineProperty(nodes,'sourceAccount',{value:account});Object.defineProperty(nodes,'timers',{value:timers});
  return nodes;
 }
 test('admin HTML supplies every directly referenced static element',()=>{
@@ -89,4 +90,41 @@ test('unsynchronized accounts show a clear placeholder rather than another rando
  const target=new Element(),button=new Element();nodes.context.target=target;nodes.context.button=button;
  await vm.runInContext('loadAccountEggPlan(ACCOUNTS[0],target,button)',nodes.context);
  assert.match(target.textContent,/尚未同步/);assert.doesNotMatch(target.textContent,/当前推荐：/);
+});
+
+test('timestamps handle ISO offsets and milliseconds and always show Beijing seconds',async()=>{
+ const nodes=await loadPage();
+ assert.equal(vm.runInContext("fmtDate('2026-11-01T02:07:51.206317+00:00')",nodes.context),'2026-11-01 10:07:51');
+ assert.equal(vm.runInContext("fmtDate('2026-11-01T02:07:51Z')",nodes.context),'2026-11-01 10:07:51');
+ assert.equal(vm.runInContext("fmtDate(Date.parse('2026-11-01T02:07:51Z'))",nodes.context),'2026-11-01 10:07:51');
+});
+test('manual refresh detects ledger changes and later metadata saves do not erase the ledger-change notice',async()=>{
+ const nodes=await loadPage();
+ Object.assign(nodes.sourceAccount,{data_fingerprint:'original'});await vm.runInContext('load()',nodes.context);
+ Object.assign(nodes.sourceAccount,{data_fingerprint:'changed',revision:4});
+ nodes.sourceAccount.books.egg.records=3;nodes.sourceAccount.books.egg.total=3;
+ await nodes['reload-top'].listeners.click();
+ assert.match(nodes.rows.textContent,/检测到账本变动/);assert.match(nodes.rows.textContent,/放蛋记录 2→3/);
+ assert.match(nodes.changes.textContent,/1 个账号账本变动/);
+ nodes.sourceAccount.revision=5;nodes.sourceAccount.recommendation_synced_at=1793491200000;
+ await vm.runInContext('load()',nodes.context);
+ assert.match(nodes.changes.textContent,/1 个账号仅推荐或保存状态更新/);
+ assert.match(nodes.rows.textContent,/检测到账本变动/);
+});
+test('automatic refresh observes updates, can be paused and skips hidden pages',async()=>{
+ const nodes=await loadPage();
+ nodes.sourceAccount.revision=4;
+ await nodes.timers[0]();assert.match(nodes.rows.textContent,/检测到同步更新/);
+ nodes['auto-refresh'].checked=false;nodes.sourceAccount.revision=5;
+ await nodes.timers[0]();assert.match(nodes.rows.textContent,/rev 4/);
+ nodes['auto-refresh'].checked=true;nodes.context.document.visibilityState='hidden';
+ await nodes.timers[0]();assert.match(nodes.rows.textContent,/rev 4/);
+ nodes.context.document.visibilityState='visible';await nodes.timers[0]();assert.match(nodes.rows.textContent,/rev 5/);
+});
+test('refreshing an open account detail updates its quantities and version state',async()=>{
+ const nodes=await loadPage();vm.runInContext('openDetail(ACCOUNTS[0])',nodes.context);
+ nodes.sourceAccount.revision=4;nodes.sourceAccount.books.egg.total=7;nodes.sourceAccount.recommendation_version=2;
+ await nodes['d-refresh'].listeners.click();
+ assert.match(nodes['d-body'].textContent,/总数 7 个/);assert.match(nodes['d-body'].textContent,/整轮推荐已同步/);
+ assert.equal(nodes['d-refresh'].disabled,false);
 });

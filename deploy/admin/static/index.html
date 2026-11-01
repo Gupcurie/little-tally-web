@@ -14,7 +14,7 @@
       <span class="dot"></span>
       <img class="admin-mars-mark" src="/icon-192.png" alt="火星演唱会标志"><h1>拆弹专家 · 账号管理</h1>
     </div>
-    <button id="logout" class="ghost" type="button">退出</button>
+    <div class="top-actions"><button id="reload-top" class="primary-refresh" type="button">刷新全部账号</button><button id="logout" class="ghost" type="button">退出</button></div>
   </header>
 
   <div id="error" class="banner error" hidden></div>
@@ -29,7 +29,7 @@
     <div class="card"><span class="k">近 7 天登录</span><strong id="s-seven">–</strong></div>
   </section>
 
-  <p id="updated" class="muted small" role="status"></p>
+  <div class="live-toolbar"><p id="updated" class="muted small" role="status"></p><label class="check"><input id="auto-refresh" type="checkbox" checked> 每10秒自动刷新</label></div><p id="changes" class="muted small" role="status">首次读取后开始检测账号变动。</p>
 
   <section class="panel">
     <div class="toolbar">
@@ -47,7 +47,7 @@
     <p id="sel-info" class="muted small">未选择账号 · 勾选后可汇总或相减，顺序即 A、B</p>
 
     <div class="table-head">
-      <span>用户名</span><span>状态</span><span>物品 / 记录</span><span>最近登录</span><span>操作</span>
+      <span>用户名</span><span>状态</span><span>物品 / 记录</span><span>保存与同步</span><span>操作</span>
     </div>
     <div id="rows" class="rows"></div>
   </section>
@@ -64,7 +64,7 @@
   <div class="modal-box">
     <div class="modal-head">
       <h2 id="d-title">账号详情</h2>
-      <button id="d-close" class="ghost" type="button">关闭</button>
+      <div class="top-actions"><button id="d-refresh" class="primary-refresh" type="button">刷新此账号</button><button id="d-close" class="ghost" type="button">关闭</button></div>
     </div>
     <div class="modal-body">
       <div class="row-actions" id="d-actions"></div>

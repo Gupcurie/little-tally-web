@@ -2,6 +2,8 @@
 
 const $ = (id) => document.getElementById(id);
 let ACCOUNTS = [];
+let LOADED_ONCE = false, LOADING = false, ACTIVE_DETAIL = null, ACTIVE_EGG_VIEW = null;
+const ACCOUNT_CHANGES = new Map();
 const SELECTED = new Set();
 const BOOK_LABELS = { sales: '销售账本', stock: '库存账本', egg: '放蛋账本' };
 
@@ -14,7 +16,7 @@ function cookie(name) {
 }
 
 async function api(path, options) {
-  const opts = Object.assign({ credentials: 'same-origin', headers: {} }, options || {});
+  const opts = Object.assign({ credentials: 'same-origin', cache: 'no-store', headers: {} }, options || {});
   if (opts.body !== undefined) {
     opts.headers['Content-Type'] = 'application/json';
     opts.headers['X-CSRF'] = cookie('admin_csrf');
@@ -36,11 +38,31 @@ async function api(path, options) {
 
 function fmtDate(value) {
   if (!value) return '—';
-  const d = new Date(value.endsWith && value.endsWith('Z') ? value : value + 'Z');
-  if (isNaN(d.getTime())) return '—';
-  const p = (n) => String(n).padStart(2, '0');
-  return d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate()) +
-    ' ' + p(d.getHours()) + ':' + p(d.getMinutes());
+  const raw = typeof value === 'string' && !/(Z|[+-]\d{2}:?\d{2})$/i.test(value) ? value + 'Z' : value;
+  const stamp = new Date(raw).getTime();if (!Number.isFinite(stamp)) return '—';
+  const d = new Date(stamp + 8 * 3600000), p = n => String(n).padStart(2, '0');
+  return d.getUTCFullYear() + '-' + p(d.getUTCMonth() + 1) + '-' + p(d.getUTCDate()) +
+    ' ' + p(d.getUTCHours()) + ':' + p(d.getUTCMinutes()) + ':' + p(d.getUTCSeconds());
+}
+function accountChange(before, after) {
+  if (!before) return {kind:'data',text:'新账号'};
+  const a = before.data_fingerprint || JSON.stringify(before.books || {}), b = after.data_fingerprint || JSON.stringify(after.books || {});
+  if (a !== b) {
+    const parts = [];
+    for (const key of ['sales','stock','egg']) {
+      const oldBook = (before.books || {})[key] || {}, newBook = (after.books || {})[key] || {}, label = key === 'egg' ? '放蛋' : key === 'sales' ? '销售' : '库存';
+      if ((oldBook.records || 0) !== (newBook.records || 0)) parts.push(label + '记录 ' + (oldBook.records || 0) + '→' + (newBook.records || 0));
+      if ((oldBook.items || 0) !== (newBook.items || 0)) parts.push(label + '物品 ' + (oldBook.items || 0) + '→' + (newBook.items || 0));
+      if (key === 'egg' && (oldBook.total || 0) !== (newBook.total || 0)) parts.push('放蛋总数 ' + (oldBook.total || 0) + '→' + (newBook.total || 0));
+    }
+    return {kind:'data',text:parts.join('；') || '物品、比例或记录内容调整'};
+  }
+  if (before.revision !== after.revision || before.recommendation_synced_at !== after.recommendation_synced_at)
+    return {kind:'sync',text:'推荐或保存状态更新，账本内容未变'};
+  return null;
+}
+function recommendationLabel(account) {
+  return account.recommendation_version === 2 ? '整轮推荐已同步' : account.recommendation_version === 1 ? '旧版推荐，需刷新用户端' : '尚未同步有效推荐';
 }
 
 function el(tag, cls, text) {
@@ -87,7 +109,7 @@ function renderSummary(summary, generatedAt) {
   $('s-records').textContent = summary.records;
   $('s-seven').textContent = summary.signed_in_7d;
   const updated = $('updated');
-  if (updated) updated.textContent = '更新于 ' + fmtDate(new Date(generatedAt * 1000).toISOString());
+  if (updated) updated.textContent = '上次检查更新于 ' + fmtDate(new Date(generatedAt * 1000).toISOString()) + '（北京时间）';
 }
 
 function statusPill(account) {
@@ -146,7 +168,17 @@ function renderRows() {
     usage.appendChild(el('span', 'muted small', account.revision === null ? '无账本' : 'rev ' + account.revision));
     row.appendChild(usage);
 
-    row.appendChild(el('div', 'cell muted small', account.last_sign_in_at ? fmtDate(account.last_sign_in_at) : '从未登录'));
+    const activity = el('div', 'cell activity');
+    activity.appendChild(el('span', null, '最后保存 ' + fmtDate(account.ledger_updated_at)));
+    activity.appendChild(el('span', 'muted small', recommendationLabel(account)));
+    activity.appendChild(el('span', 'muted small', '推荐同步 ' + fmtDate(account.recommendation_synced_at)));
+    const change = ACCOUNT_CHANGES.get(account.id);
+    if (change) {
+      activity.appendChild(el('span', 'change-badge ' + change.kind, change.kind === 'data' ? '检测到账本变动' : '检测到同步更新'));
+      activity.appendChild(el('span', 'small', change.text));
+      activity.appendChild(el('span', 'muted small', '检测于 ' + fmtDate(change.at)));
+    }
+    row.appendChild(activity);
 
     const actions = el('div', 'cell actions');
     const detail = el('button', 'ghost small', '详情');
@@ -255,6 +287,8 @@ async function resetPassword(account, button) {
 }
 
 function openDetail(account) {
+  const hadPlan = ACTIVE_EGG_VIEW && ACTIVE_EGG_VIEW.id === account.id && ACTIVE_EGG_VIEW.loaded;
+  ACTIVE_DETAIL = account.id;ACTIVE_EGG_VIEW = null;
   $('d-title').textContent = account.username || account.id.slice(0, 8);
 
   const actions = $('d-actions');
@@ -281,7 +315,10 @@ function openDetail(account) {
     ['注册时间', fmtDate(account.created_at)],
     ['最近登录', account.last_sign_in_at ? fmtDate(account.last_sign_in_at) : '从未登录'],
     ['账本修订', account.revision === null ? '无' : String(account.revision)],
-    ['最后保存', account.ledger_updated_at ? fmtDate(account.ledger_updated_at) : '—'],
+    ['最后保存', fmtDate(account.ledger_updated_at)],
+    ['现有记录中最近一次', fmtDate(account.latest_record_at)],
+    ['推荐状态', recommendationLabel(account)],
+    ['推荐同步时间', fmtDate(account.recommendation_synced_at)],
     ['密码', '单向哈希存储，无法查看，只能重置'],
   ];
   for (const [k, v] of pairs) {
@@ -302,7 +339,8 @@ function openDetail(account) {
       const view = el('button', 'ghost small', '查看当前推荐与本轮顺序');
       view.type = 'button';
       const content = el('div');
-      view.addEventListener('click', () => loadAccountEggPlan(account, content, view));
+      view.addEventListener('click', () => {ACTIVE_EGG_VIEW.loaded = true;return loadAccountEggPlan(account, content, view);});
+      ACTIVE_EGG_VIEW = {id:account.id,target:content,button:view,loaded:Boolean(hadPlan)};
       preview.appendChild(view);preview.appendChild(content);section.appendChild(preview);
     }
     if (!book.lines.length) {
@@ -320,6 +358,7 @@ function openDetail(account) {
     body.appendChild(section);
   }
   $('detail').hidden = false;
+  if (hadPlan && ACTIVE_EGG_VIEW) loadAccountEggPlan(account, ACTIVE_EGG_VIEW.target, ACTIVE_EGG_VIEW.button);
 }
 
 function loadRecommendationCore() { return import('/core.js'); }
@@ -467,29 +506,44 @@ function label(action) {
   })[action] || action;
 }
 
-async function load() {
+async function load(options = {}) {
+  if (LOADING) return false;
+  LOADING = true;let received = false;
+  for (const id of ['reload','reload-top','d-refresh']) $(id).disabled = true;
   showError('');
-  let data;
   try {
-    data = await api('/api/accounts');
-  } catch (err) {
-    if (err.message !== 'unauthenticated') showError('读取账号失败：' + err.message + '，请稍后刷新重试。');
-    return;
-  }
-  try {
-    ACCOUNTS = data.accounts;
-    const alive = new Set(ACCOUNTS.map((a) => a.id));
+    const data = await api('/api/accounts');received = true;const old = new Map(ACCOUNTS.map(a=>[a.id,a]));
+    let changed = 0, synced = 0;
+    if (LOADED_ONCE) for (const account of data.accounts) {
+      const change = accountChange(old.get(account.id), account);
+      if (change) {const previous=ACCOUNT_CHANGES.get(account.id);if(change.kind==='data'||previous?.kind!=='data')ACCOUNT_CHANGES.set(account.id,{...change,at:Date.now()});if(change.kind==='data')changed++;else synced++;}
+    }
+    const first = !LOADED_ONCE;ACCOUNTS = data.accounts;LOADED_ONCE = true;
+    const alive = new Set(ACCOUNTS.map(a=>a.id));
     for (const id of Array.from(SELECTED)) if (!alive.has(id)) SELECTED.delete(id);
-    renderSummary(data.summary, data.generated_at);
-    renderRows();
+    for (const id of ACCOUNT_CHANGES.keys()) if (!alive.has(id)) ACCOUNT_CHANGES.delete(id);
+    renderSummary(data.summary, data.generated_at);renderRows();
+    $('changes').textContent = first ? '已建立当前数据基准；后续刷新会标出账本变动和仅同步更新。' :
+      '本次检查：' + changed + ' 个账号账本变动，' + synced + ' 个账号仅推荐或保存状态更新。';
+    const current = ACCOUNTS.find(a=>a.id===ACTIVE_DETAIL);
+    if (current && !$('detail').hidden && (options.forceDetail || JSON.stringify(current)!==JSON.stringify(old.get(current.id)))) {
+      const body = $('d-body').parentElement, scroll = body ? body.scrollTop : 0;
+      openDetail(current);if(body)body.scrollTop=scroll;
+    }
+    return true;
   } catch (err) {
-    showError('管理页面显示异常：' + err.message + '，请刷新页面重试。');
+    if (err.message !== 'unauthenticated') showError(received ? '管理页面显示异常：' + err.message + '，请刷新页面重试。' : '读取账号失败：' + err.message + '，已保留上次显示的数据，请稍后刷新重试。');
+    return false;
+  } finally {
+    LOADING = false;for (const id of ['reload','reload-top','d-refresh']) $(id).disabled = false;
+    loadAudit();
   }
-  loadAudit();
 }
 
 $('search').addEventListener('input', renderRows);
 $('reload').addEventListener('click', load);
+$('reload-top').addEventListener('click', load);
+$('d-refresh').addEventListener('click', () => load({forceDetail:true}));
 $('btn-sum').addEventListener('click', () => runAggregate('sum'));
 $('btn-diff').addEventListener('click', () => runAggregate('diff'));
 $('sel-all').addEventListener('change', (event) => {
@@ -502,7 +556,7 @@ $('logout').addEventListener('click', async () => {
   try { await api('/api/logout', { method: 'POST', body: '{}' }); } catch (e) { /* ignore */ }
   window.location.href = '/admin/';
 });
-$('d-close').addEventListener('click', () => { $('detail').hidden = true; });
+$('d-close').addEventListener('click', () => { $('detail').hidden = true;ACTIVE_DETAIL=null;ACTIVE_EGG_VIEW=null; });
 $('a-close').addEventListener('click', () => { $('agg').hidden = true; });
 $('s-close').addEventListener('click', () => { $('secret').hidden = true; });
 $('s-copy').addEventListener('click', async () => {
@@ -511,8 +565,11 @@ $('s-copy').addEventListener('click', async () => {
 });
 for (const id of ['detail', 'agg', 'secret']) {
   $(id).addEventListener('click', (event) => {
-    if (event.target === $(id)) $(id).hidden = true;
+    if (event.target === $(id)) {$(id).hidden = true;if(id==='detail'){ACTIVE_DETAIL=null;ACTIVE_EGG_VIEW=null;}}
   });
 }
 
+setInterval(() => {if ($('auto-refresh').checked && document.visibilityState !== 'hidden') return load();},10000);
+document.addEventListener('visibilitychange', () => {if (document.visibilityState === 'visible' && $('auto-refresh').checked) load();});
+$('auto-refresh').addEventListener('change', () => {if ($('auto-refresh').checked) load();});
 load();
