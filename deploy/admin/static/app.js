@@ -5,6 +5,12 @@ let ACCOUNTS = [];
 let LOADED_ONCE = false, LOADING = false, ACTIVE_DETAIL = null, ACTIVE_EGG_VIEW = null;
 const ACCOUNT_CHANGES = new Map();
 const SELECTED = new Set();
+const PIN_STORAGE = 'tally-admin-pinned-accounts-v1';
+function readPinnedAccounts(){try{const ids=JSON.parse(localStorage.getItem(PIN_STORAGE)||'[]');return new Set(Array.isArray(ids)?ids.filter(id=>typeof id==='string'&&/^[0-9a-fA-F-]{36}$/.test(id)):[]);}catch{return new Set();}}
+const PINNED = readPinnedAccounts();
+function accountModifiedTime(account){const value=account.ledger_updated_at;if(!value)return 0;const raw=typeof value==='string'&&!/(Z|[+-]\d{2}:?\d{2})$/i.test(value)?value+'Z':value;const time=new Date(raw).getTime();return Number.isFinite(time)?time:0;}
+function compareAccounts(a,b){return Number(PINNED.has(b.id))-Number(PINNED.has(a.id))||accountModifiedTime(b)-accountModifiedTime(a)||(a.username||'').localeCompare(b.username||'','zh-CN')||a.id.localeCompare(b.id);}
+function togglePinnedAccount(id){if(PINNED.has(id))PINNED.delete(id);else PINNED.add(id);let saved=true;try{localStorage.setItem(PIN_STORAGE,JSON.stringify([...PINNED]));}catch{saved=false;}renderRows();if(!saved)flash('置顶已在本页生效，浏览器未能保存，关闭页面后可能失效。');}
 const BOOK_LABELS = { sales: '销售账本', stock: '库存账本', egg: '放蛋账本' };
 
 function cookie(name) {
@@ -133,7 +139,7 @@ function updateSelection() {
 
 function renderRows() {
   const needle = $('search').value.trim().toLowerCase();
-  const list = ACCOUNTS.filter((a) => !needle || (a.username || '').toLowerCase().includes(needle));
+  const list = ACCOUNTS.filter((a) => !needle || (a.username || '').toLowerCase().includes(needle)).sort(compareAccounts);
   const rows = $('rows');
   rows.textContent = '';
   if (!list.length) {
@@ -141,7 +147,7 @@ function renderRows() {
     return;
   }
   for (const account of list) {
-    const row = el('div', 'row');
+    const row = el('div', 'row' + (PINNED.has(account.id) ? ' account-pinned' : ''));
 
     const who = el('div', 'cell who');
     const box = document.createElement('input');
@@ -155,6 +161,7 @@ function renderRows() {
     who.appendChild(box);
     const nameBox = el('div', 'namebox');
     nameBox.appendChild(el('strong', null, account.username || '(无用户名)'));
+    if (PINNED.has(account.id)) nameBox.appendChild(el('span', 'pin-marker', '已置顶'));
     nameBox.appendChild(el('span', 'muted small', '注册 ' + fmtDate(account.created_at)));
     who.appendChild(nameBox);
     row.appendChild(who);
@@ -181,6 +188,9 @@ function renderRows() {
     row.appendChild(activity);
 
     const actions = el('div', 'cell actions');
+    const pin = el('button', 'ghost small pin-action' + (PINNED.has(account.id) ? ' is-pinned' : ''), PINNED.has(account.id) ? '取消置顶' : '置顶');
+    pin.type = 'button';pin.setAttribute('aria-pressed', String(PINNED.has(account.id)));
+    pin.addEventListener('click', () => togglePinnedAccount(account.id));actions.appendChild(pin);
     const detail = el('button', 'ghost small', '详情');
     detail.type = 'button';
     detail.addEventListener('click', () => openDetail(account));
@@ -549,7 +559,7 @@ $('btn-diff').addEventListener('click', () => runAggregate('diff'));
 $('sel-all').addEventListener('change', (event) => {
   const on = event.target.checked;
   SELECTED.clear();
-  if (on) for (const a of ACCOUNTS) SELECTED.add(a.id);
+  if (on) for (const a of ACCOUNTS.slice().sort(compareAccounts)) SELECTED.add(a.id);
   renderRows();
 });
 $('logout').addEventListener('click', async () => {

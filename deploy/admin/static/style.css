@@ -430,3 +430,8 @@ body.center {
 .change-badge.sync{background:#eaf7ef;color:#287c52}
 #changes{margin:0 0 16px}
 @media(max-width:760px){.row .activity{grid-area:login}.top{align-items:flex-start;gap:12px;flex-wrap:wrap}.top-actions{gap:6px}.modal-head{gap:10px;align-items:flex-start;flex-wrap:wrap}.primary-refresh{padding:9px 10px;font-size:12px}}
+
+.pin-marker{display:inline-block;align-self:flex-start;color:#b92543;background:#fce3ea;border-radius:6px;padding:2px 6px;font-size:10px}
+.pin-action.is-pinned{border-color:#e7a3b4;background:#fff0f4;color:#b92543}
+.account-pinned .namebox strong{color:#b92543}
+.account-order-hint{margin:0 0 12px}

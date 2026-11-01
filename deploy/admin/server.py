@@ -282,6 +282,19 @@ def account_activity(payload):
     }
 
 
+def account_modified_time(account):
+    value = account.get('ledger_updated_at')
+    if not value:
+        return 0
+    try:
+        stamp = datetime.fromisoformat(value.replace('Z', '+00:00'))
+        if stamp.tzinfo is None:
+            stamp = stamp.replace(tzinfo=timezone.utc)
+        return stamp.timestamp()
+    except (ValueError, TypeError, AttributeError, OverflowError):
+        return 0
+
+
 def fetch_accounts():
     users = []
     page = 1
@@ -322,7 +335,7 @@ def fetch_accounts():
             'records': sum(v['records'] for v in stats.values()) if stats else 0,
             **account_activity((row or {}).get('payload')),
         })
-    accounts.sort(key=lambda a: (a['username'] or '~'))
+    accounts.sort(key=lambda a: (-account_modified_time(a), a['username'] or '~', a['id']))
     return accounts
 
 

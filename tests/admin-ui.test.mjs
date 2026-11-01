@@ -12,6 +12,7 @@ class Element {
  get textContent(){return this._text+this.children.map(c=>c.textContent).join('');}
  appendChild(child){this.children.push(child);return child;}
  addEventListener(name,fn){this.listeners[name]=fn;}
+ setAttribute(name,value){this[name]=String(value);}
 }
 async function loadPage({missingUpdated=false,failApi=false,recommendation=null}={}){
  const nodes=Object.fromEntries([...html.matchAll(/\bid="([^"]+)"/g)].map(m=>[m[1],new Element()]));
