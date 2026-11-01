@@ -20,9 +20,10 @@ function fixture(){
 test('cloud acknowledgement persists records across a fresh login',async()=>{const f=fixture(),a=f.make();await a.init();const id=a.state.sales.items[0].id;await a.commit(s=>C.change(s.sales,id,1));const b=f.make();await b.init();assert.equal(C.counts(b.state.sales)[id],1);assert.equal(b.cloudRevision,1);a.channel?.close();b.channel?.close();});
 test('saved egg recommendation shares the exact sequence through cloud reload and advances atomically with a placement',async()=>{
  const f=fixture(),a=f.make();await a.init();
- await a.commit(s=>{const egg=C.ensureEgg(s);C.eggAddItem(egg,'甲',8);C.eggAddItem(egg,'乙',3);egg.recommendation=C.eggCreatePlan(egg);});
+ await a.commit(s=>{const egg=C.ensureEgg(s);[['甲',8],['乙',6],['丙',1],['丁',1]].forEach(([name,ratio])=>C.eggAddItem(egg,name,ratio));egg.recommendation=C.eggCreatePlan(egg);});
  const original=[...C.eggSavedSequence(a.state.egg.recommendation)],b=f.make();await b.init();
  assert.deepEqual([...C.eggSavedSequence(b.state.egg.recommendation)],original);
+ assert.equal(b.state.egg.recommendation.context.rareSpacing,1);
  const beforeRecords=a.state.egg.records.length;
  await a.commit(s=>{const egg=s.egg,previous=egg.recommendation;C.eggChange(egg,original[0],1);egg.recommendation=C.eggAdvancePlan(egg,previous,original[0]);});
  await b.reload();assert.equal(b.state.egg.records.length,beforeRecords+1);

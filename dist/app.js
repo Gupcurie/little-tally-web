@@ -279,7 +279,7 @@ function eggPickId(egg){
  const key=eggPickKey(egg),storedMark=JSON.stringify(egg.recommendation||null);
  if(state.eggPick?.key===key&&state.eggPick.storedMark===storedMark&&egg.items.some(i=>i.id===state.eggPick.id))return state.eggPick.id;
  const saved=C.eggStoredPlan(egg),picks=C.eggRecommendationSet(egg,egg.items.length).map(p=>p.id);
- const snapshot=saved?.version===2?saved:C.eggCreatePlan(egg);
+ const snapshot=saved?.version===2&&saved.context.rareSpacing===1?saved:C.eggCreatePlan(egg);
  const id=picks.length?C.eggSavedSequence(snapshot).next().value:null;
  state.eggPick=id?{key,id,picks:[id,...picks.filter(p=>p!==id)],alternative:false,storedMark,snapshot}:null;
  return state.eggPick?.id||null;

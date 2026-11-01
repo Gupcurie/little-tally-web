@@ -214,7 +214,7 @@ export function decodeBackup(text,expected){
 // ---------------------------------------------------------------------------
 // 放蛋：按比例排产的点数账本。
 // 每个物品有一个比例（份数），每轮要求各拿满 ratio 个；多出来的自动计入下一轮。
-// 推荐用“理想进度差额”排队：谁落后最多先给谁，天然把占比小的物品拉得更开。
+// 推荐结合剩余配额、实际放入历史、间隔代价和安全随机，不固定轮内位置。
 // ---------------------------------------------------------------------------
 export const EGG_ZONE = ZONE;
 export function emptyEgg(){return {book:'egg',items:[],records:[],goal:null};}
@@ -330,12 +330,21 @@ function eggRecommendationContext(egg){
   distance+=r.delta;
   if(gaps.size===items.length&&recent.length===3)break;
  }
- return {items,c,round,gaps,recent};
+ return {items,c,round,gaps,recent,rareSpacing:1};
+}
+// Treat the smaller categories as a group as well as spacing each category.
+// Equal-weight categories are not rare just because there are many of them.
+function eggLowGroup(items){
+ const total=sum(items.map(i=>i.ratio)),largest=Math.max(0,...items.map(i=>i.ratio));
+ const low=items.filter(i=>i.ratio*2<=largest&&i.ratio*items.length<total&&i.ratio*4<=total);
+ const ids=new Set(low.length>=2?low.map(i=>i.id):[]),weight=sum(low.map(i=>i.ratio));
+ const period=weight?total/weight:1;
+ return {ids,period,cooldown:Math.max(2,Math.floor(period*.65))};
 }
 export function eggRecommendationSet(egg,count=4,random=eggRandom){
  return eggRecommendationChoices(eggRecommendationContext(egg),count,random);
 }
-function eggRecommendationChoices({items,c,round,gaps,recent},count,random){
+function eggRecommendationChoices({items,c,round,gaps,recent,rareSpacing},count,random){
  if(!items.length)return [];
  const progress=items.map(i=>({...i,progress:Math.min(i.ratio,c[i.id]-round*i.ratio)}));
  const totalRatio=sum(items.map(i=>i.ratio)),placed=sum(progress.map(i=>i.progress));
@@ -362,6 +371,19 @@ function eggRecommendationChoices({items,c,round,gaps,recent},count,random){
  const lastShare=(items.find(i=>i.id===recent[0])?.ratio||0)/totalRatio;
  const noRepeat=preferred.filter(i=>i.id!==recent[0]);
  if(lastShare<=0.5&&noRepeat.length)preferred=noRepeat;
+ // Retain the old stream for saved legacy plans, including their >512 tail.
+ const low=eggLowGroup(rareSpacing===1?items:[]),lowGap=Math.min(Infinity,...[...low.ids].map(id=>gaps.get(id)??Infinity));
+ if(low.ids.size){
+  const left=sum(scheduled.filter(i=>low.ids.has(i.id)).map(i=>i.left));
+  const collisions=i=>{
+   const isLow=low.ids.has(i.id),remaining=left-Number(isLow),others=slots-1-remaining;
+   return Number(isLow&&low.ids.has(recent[0]))+Math.max(0,remaining-others-(isLow?0:1));
+  };
+  // Reserve separators now, instead of spending them all and clustering the tail.
+  const least=Math.min(...preferred.map(collisions));preferred=preferred.filter(i=>collisions(i)===least);
+  const separated=preferred.filter(i=>!low.ids.has(i.id)||lowGap>=low.cooldown);
+  if(separated.length)preferred=separated;
+ }
  if(recent.length===3&&recent[0]===recent[2]&&recent[0]!==recent[1]){
   const varied=preferred.filter(i=>i.id!==recent[1]&&i.deficit>=-0.75);if(varied.length)preferred=varied;
  }
@@ -378,7 +400,8 @@ function eggRecommendationChoices({items,c,round,gaps,recent},count,random){
   const repeat=i.id===recent[0]?2*(1-share):0;
   const crowding=2*Math.max(0,1-gap/i.period)**2;
   const future=2*(repeatsAfter(i)-unavoidable);
-  const logWeight=Math.log(i.left)+1.1*i.deficit-repeat-crowding-future;
+  const groupCrowding=low.ids.has(i.id)?2*Math.max(0,1-lowGap/low.period)**2:0;
+  const logWeight=Math.log(i.left)+1.1*i.deficit-repeat-crowding-future-groupCrowding;
   const u=Math.min(1-Number.EPSILON,Math.max(Number.EPSILON,random()));
   return {id:i.id,name:i.name,ratio:i.ratio,round,score:logWeight-Math.log(-Math.log(u)),
    deficit:i.deficit,preferred:preferredIDs.has(i.id),reason:'按剩余配额随机穿插'};
@@ -410,6 +433,8 @@ function eggApplyPick(context,id){
 function eggSequenceQuality(context,order){
  const gaps=new Map(context.gaps),recent=context.recent.slice(),total=sum(context.items.map(i=>i.ratio));
  const periods=new Map(context.items.map(i=>[i.id,total/i.ratio]));
+ const low=eggLowGroup(context.items);
+ let lowGap=Math.min(Infinity,...[...low.ids].map(id=>gaps.get(id)??Infinity)),lowAdjacent=0,lowClose=0;
  let repeats=0,minorRepeats=0,rareClose=0,spacing=0,alternating=0,streak=0,maxRun=0,last=recent[0];
  for(const id of recent){if(id!==last)break;streak++;}
  for(const id of order){
@@ -418,11 +443,18 @@ function eggSequenceQuality(context,order){
   streak=last===id?streak+1:1;last=id;maxRun=Math.max(maxRun,streak);
   if(period>=4&&gap<Math.floor(period*.5))rareClose++;
   spacing+=Math.min(6,Math.sqrt(period))*Math.max(0,1-gap/period)**2;
+  if(low.ids.has(id)){
+   if(lowGap===1)lowAdjacent++;
+   if(lowGap<low.cooldown)lowClose++;
+   spacing+=2*Math.min(6,Math.sqrt(low.period))*Math.max(0,1-lowGap/low.period)**2;
+   lowGap=0;
+  }
+  lowGap++;
   if(recent.length===3&&id===recent[1]&&recent[0]===recent[2]&&id!==recent[0])alternating++;
   for(const [key,n] of gaps)gaps.set(key,n+1);
   gaps.set(id,1);recent.unshift(id);recent.length=Math.min(3,recent.length);
  }
- return {repeats,minorRepeats,rareClose,maxRun,energy:spacing+.7*alternating+.9*repeats};
+ return {repeats,minorRepeats,rareClose,lowAdjacent,lowClose,maxRun,energy:spacing+.7*alternating+.9*repeats};
 }
 function eggSequenceDistance(a,b){
  const n=Math.min(a.length,b.length);if(!n)return {changed:0,value:0};
@@ -463,7 +495,10 @@ function eggWholeRound(context,random,{firstId,previous,total}){
   for(let trial=0;trial<attempts*3;trial++){
    const order=bases[Math.floor(random()*bases.length)].order.slice(),start=firstId?1:0;
    if(size-start>1){
-    if(trial%3===0){for(let k=size-1;k>start;k--){const j=start+Math.floor(random()*(k-start+1));[order[k],order[j]]=[order[j],order[k]];}}
+    // Rotations move the rare slots substantially without destroying all the
+    // useful spacing in an otherwise good ordering. History is scored again.
+    if(trial%4===0&&size===total){const tail=order.slice(start),shift=Math.floor(random()*tail.length);order.splice(start,tail.length,...tail.slice(shift),...tail.slice(0,shift));}
+    else if(trial%4===1){for(let k=size-1;k>start;k--){const j=start+Math.floor(random()*(k-start+1));[order[k],order[j]]=[order[j],order[k]];}}
     else for(let k=0;k<2+trial%7;k++){const a=start+Math.floor(random()*(size-start)),b=start+Math.floor(random()*(size-start));[order[a],order[b]]=[order[b],order[a]];}
    }
    add(order);
@@ -476,6 +511,8 @@ function eggWholeRound(context,random,{firstId,previous,total}){
  // near-alternating tiny round can have only one acceptable arrangement.
  good=good.filter(c=>c.quality.repeats<=repeats+(valid(prior)&&dominant?1:0));
  const maxRun=Math.min(...good.map(c=>c.quality.maxRun));good=good.filter(c=>c.quality.maxRun<=Math.max(2,maxRun));
+ const lowAdjacent=Math.min(...good.map(c=>c.quality.lowAdjacent));good=good.filter(c=>c.quality.lowAdjacent===lowAdjacent);
+ const lowClose=Math.min(...good.map(c=>c.quality.lowClose));good=good.filter(c=>c.quality.lowClose===lowClose);
  const rareClose=Math.min(...good.map(c=>c.quality.rareClose));good=good.filter(c=>c.quality.rareClose===rareClose);
  const best=Math.min(...good.map(c=>c.quality.energy));good=good.filter(c=>c.quality.energy<=best+Math.max(1.6,size*.03));
  let comparison=null;

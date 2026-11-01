@@ -142,6 +142,13 @@ test('a cloud reroll at unchanged quantities replaces the cached plan even with 
  assert.equal(after.snapshot,replacement);assert.equal(after.ids[0],before.ids[0]);
  assert.deepEqual(Array.from(after.ids),[...C.eggSavedSequence(replacement)]);
 });
+
+test('opening an older account upgrades the recommendation model without changing quantities or records',()=>{
+ const egg=fixture([10,8,1,1]);egg.recommendation=C.eggCreatePlan(egg);delete egg.recommendation.context.rareSpacing;
+ const before=JSON.stringify(egg),{ctx}=page(egg),plan=ctx.eggPlan(egg);
+ assert.equal(plan.snapshot.context.rareSpacing,1);assert.notEqual(plan.snapshot,egg.recommendation);
+ assert.equal(JSON.stringify(egg),before);assert.equal(egg.records.length,0);
+});
 test('the real page syncs recommendation metadata without count records and saves the next pick with a placement',async()=>{
  const egg=fixture(),{ctx}=page(egg),root={egg};let scheduled,commits=0;
  Object.assign(ctx,{localMode:false,eggPlanSyncTask:null,eggPlanSyncTimer:null,
