@@ -29,6 +29,19 @@ test('saved egg recommendation shares the exact sequence through cloud reload an
  assert.ok(C.eggStoredPlan(b.state.egg));assert.deepEqual([...C.eggSavedSequence(b.state.egg.recommendation)],original.slice(1));
  assert.equal(C.total(b.state.sales),0);a.channel?.close();b.channel?.close();
 });
+test('sales-stock binding persists across login and its sale/inventory movement is acknowledged together',async()=>{
+ const f=fixture(),a=f.make();await a.init();
+ const sale=a.state.sales.items[0].id,stock=a.state.stock.items[0].id;
+ await a.commit(s=>{C.setCount(s.stock,stock,10);C.setSalesStockEnabled(s,true);});
+ await a.commit(s=>C.mutateBoundBook(s,'sales',b=>C.change(b,sale,1)));
+ const b=f.make();await b.init();assert.equal(C.salesStockEnabled(b.state),true);
+ assert.equal(C.counts(b.state.sales)[sale],1);assert.equal(C.counts(b.state.stock)[stock],9);
+ assert.equal(b.state.sales.records.at(-1).bindingId,b.state.stock.records.at(-1).bindingId);
+ const before=b.cloudRevision;await assert.rejects(b.commit(s=>C.mutateBoundBook(s,'sales',book=>C.setCount(book,sale,20))),/库存不足/);
+ assert.equal(b.cloudRevision,before);assert.equal(C.counts(b.state.stock)[stock],9);
+ f.setSession(f.sessions.B);await b.setSession(f.sessions.B);assert.equal(C.salesStockEnabled(b.state),false);
+ a.channel?.close();b.channel?.close();
+});
 test('changing account clears the previous rendered ledger and local cache',async()=>{const f=fixture(),a=f.make();await a.init();await a.commit(s=>C.setCount(s.sales,s.sales.items[0].id,12));f.setSession(f.sessions.B);await a.setSession(f.sessions.B);assert.equal(a.user.id,'account-b');assert.equal(C.total(a.state.sales),0);assert.equal(f.caches[0].cleared,true);await a.commit(s=>C.setCount(s.sales,s.sales.items[0].id,7));assert.equal(C.total(f.rows.get('account-a').payload.sales),12);assert.equal(C.total(f.rows.get('account-b').payload.sales),7);a.channel?.close();});
 test('logout retains cloud data while erasing the current local account view',async()=>{const f=fixture(),a=f.make();await a.init();await a.commit(s=>C.change(s.sales,s.sales.items[0].id,1));await a.logout();assert.equal(a.signedIn,false);assert.equal(a.user,null);assert.equal(C.total(a.state.sales),0);assert.equal(f.caches[0].cleared,true);assert.equal(C.total(f.rows.get('account-a').payload.sales),1);a.channel?.close();});
 test('late cloud response from A cannot be written to or displayed as B',async()=>{const f=fixture();let release,started;const waiting=new Promise(r=>started=r),gate=new Promise(r=>release=r);let writes=0;const a=f.make({fetcher:async(url,options)=>{if(url.endsWith('rpc/tally_save')&&++writes===1){started();await gate;}return f.fetcher(url,options);}});await a.init();const promise=a.commit(s=>C.setCount(s.sales,s.sales.items[0].id,55));await waiting;f.setSession(f.sessions.B);await a.setSession(f.sessions.B);release();await assert.rejects(promise);assert.equal(a.user.id,'account-b');assert.equal(C.total(a.state.sales),0);assert.equal(f.rows.has('account-b'),false);a.channel?.close();});

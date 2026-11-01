@@ -38,11 +38,25 @@ export function validateBook(book){
   requireThat(book.book==='stock'||Object.keys(i.breakdown).length===0,'销售账本不能包含库存分项。');
  }
  for(const r of book.records){requireThat(r&&validID(r.id)&&!recordIDs.has(r.id)&&ids.has(r.itemId)&&Number.isSafeInteger(r.delta)&&Math.abs(r.delta)<=MAX&&validTime(r.at)&&['count','set'].includes(r.kind),'历史记录无效。');recordIDs.add(r.id);}
+ for(const r of book.records){
+  if(r.bindingId!==undefined)requireThat(validID(r.bindingId),'联动记录编号无效。');
+  if(r.bindingPart!==undefined)requireThat(book.book==='stock'&&(r.bindingPart===null||typeof r.bindingPart==='string'&&r.bindingPart.length>0&&r.bindingPart.length<=20),'联动库存分项无效。');
+ }
  const values=counts(book);for(const i of book.items)requireThat(values[i.id]>=0&&values[i.id]<=MAX&&Number.isSafeInteger(values[i.id])&&partsTotal(i)<=values[i.id],'总数不能为负、超过上限或小于库存分项合计。');
  if(book.goal)validateGoal(book,book.goal);
  return book;
 }
-export function validateState(state){requireThat(state&&state.format==='little-tally-pocket'&&state.version===1&&Number.isSafeInteger(state.revision)&&state.revision>=0&&state.sales?.book==='sales'&&state.stock?.book==='stock','本机记录格式不正确。');validateBook(state.sales);validateBook(state.stock);return state;}
+export function validateState(state){
+ requireThat(state&&state.format==='little-tally-pocket'&&state.version===1&&Number.isSafeInteger(state.revision)&&state.revision>=0&&state.sales?.book==='sales'&&state.stock?.book==='stock','本机记录格式不正确。');
+ validateBook(state.sales);validateBook(state.stock);
+ if(state.salesStockBinding!==undefined){
+  const config=state.salesStockBinding;
+  requireThat(config&&typeof config.enabled==='boolean'&&config.pairs&&typeof config.pairs==='object'&&!Array.isArray(config.pairs)&&Object.keys(config.pairs).length<=200,'销售库存绑定设置无效。');
+  for(const [id,pair] of Object.entries(config.pairs))requireThat(validID(id)&&pair&&(pair.stockId===null||validID(pair.stockId))&&(pair.part===null||typeof pair.part==='string'&&pair.part.length>0&&pair.part.length<=20),'销售库存对应关系无效。');
+ }
+ for(const group of bindingGroups(state).values())requireThat(group.sales.length<=1&&group.stock.length<=1&&(!group.sales.length||!group.stock.length||group.sales[0].delta===-group.stock[0].delta),'销售库存联动记录不一致。');
+ return state;
+}
 export function addItem(book,name){name=name.trim();requireThat(name.length>0&&name.length<=40&&!book.items.some(i=>i.name===name)&&book.items.length<200,'请输入不重复的名称，最多 40 字、200 类物品。');book.items.push({id:uid(),name,color:book.items.length,created:Date.now(),breakdown:{}});}
 export function setCount(book,id,value,kind='set'){
  const item=book.items.find(i=>i.id===id);requireThat(item&&Number.isSafeInteger(value)&&value>=0&&value<=MAX&&value>=partsTotal(item),'数量不能为负、超过上限或低于分项合计。');
@@ -60,6 +74,108 @@ export function setPart(book,id,name,value){
 export function deletePart(book,id,name){const item=book.items.find(i=>i.id===id);requireThat(book.book==='stock'&&item,'找不到此库存物品。');delete item.breakdown[name];}
 export function deleteItem(book,id){book.items=book.items.filter(i=>i.id!==id);book.records=book.records.filter(r=>r.itemId!==id);book.goal=null;}
 export function deleteRecords(book,ids){const next={...book,records:book.records.filter(r=>!ids.has(r.id))};validateBook(next);book.records=next.records;}
+
+export const salesStockEnabled=state=>state.salesStockBinding?.enabled===true;
+function writeBindingPair(pairs,id,pair){Object.defineProperty(pairs,id,{value:pair,writable:true,enumerable:true,configurable:true});}
+export function salesStockPair(state,salesId){
+ const sale=state.sales.items.find(i=>i.id===salesId);if(!sale)return null;
+ const pairs=state.salesStockBinding?.pairs||{};
+ if(Object.hasOwn(pairs,salesId))return pairs[salesId];
+ const stock=state.stock.items.find(i=>i.name===sale.name);
+ return stock?{stockId:stock.id,part:null}:null;
+}
+function cleanSalesStockPairs(state){
+ if(!state.salesStockBinding)return;
+ const pairs=state.salesStockBinding.pairs;
+ for(const id of Object.keys(pairs)){
+  if(!state.sales.items.some(i=>i.id===id)){delete pairs[id];continue;}
+  const item=state.stock.items.find(i=>i.id===pairs[id].stockId);
+  if(!item)writeBindingPair(pairs,id,{stockId:null,part:null});
+  else if(pairs[id].part!==null&&!Object.hasOwn(item.breakdown,pairs[id].part))pairs[id].part=null;
+ }
+}
+export function setSalesStockEnabled(state,enabled){
+ requireThat(typeof enabled==='boolean','请选择是否绑定。');
+ const next=clone(state),pairs=next.salesStockBinding?.pairs||{};
+ next.salesStockBinding={enabled,pairs};cleanSalesStockPairs(next);
+ for(const item of next.sales.items)if(!Object.hasOwn(pairs,item.id)){
+  const stock=next.stock.items.find(i=>i.name===item.name);if(stock)writeBindingPair(pairs,item.id,{stockId:stock.id,part:null});
+ }
+ validateState(next);state.salesStockBinding=next.salesStockBinding;
+}
+export function setSalesStockPair(state,salesId,stockId,part=null){
+ requireThat(state.sales.items.some(i=>i.id===salesId),'找不到销售品类。');
+ const stock=state.stock.items.find(i=>i.id===stockId);
+ requireThat(stockId===null||stock,'请选择对应库存品类。');
+ requireThat(part===null||stock&&Object.hasOwn(stock.breakdown,part),'请选择有效的库存分项。');
+ const config=clone(state.salesStockBinding||{enabled:false,pairs:{}});
+ writeBindingPair(config.pairs,salesId,{stockId,part:stockId===null?null:part});state.salesStockBinding=config;
+}
+function linkedStockChange(stock,itemId,part,delta,record){
+ const item=stock.items.find(i=>i.id===itemId);requireThat(item,'对应库存品类不存在，请到设置重新绑定。');
+ const current=counts(stock)[itemId],next=current+delta;
+ requireThat(next>=0&&next<=MAX,delta<0?`${item.name}库存不足，这笔销售没有保存。`:'库存数量超出上限，这次销量调整没有保存。');
+ if(part!==null){
+  requireThat(Object.hasOwn(item.breakdown,part),'绑定库存分项已不存在，请到设置重新选择。');
+  requireThat(item.breakdown[part]+delta>=0,`${item.name}的“${part}”库存不足，这笔销售没有保存。`);
+  if(delta<0)item.breakdown[part]+=delta;
+ }else requireThat(delta>=0||current-partsTotal(item)>=-delta,`${item.name}的未分类库存不足，请在设置中选择扣减分项。`);
+ setCount(stock,itemId,next,record.kind);
+ if(part!==null&&delta>0)item.breakdown[part]+=delta;
+ const paired=stock.records.at(-1);paired.at=record.at;paired.bindingId=record.bindingId;paired.bindingPart=part;
+}
+function bindingGroups(state){
+ const groups=new Map();
+ for(const book of ['sales','stock'])for(const record of state[book].records)if(validID(record.bindingId)){
+  if(!groups.has(record.bindingId))groups.set(record.bindingId,{sales:[],stock:[]});groups.get(record.bindingId)[book].push(record);
+ }
+ return groups;
+}
+export function mutateBoundBook(state,kind,mutator){
+ requireThat(['sales','stock'].includes(kind),'请选择销售或库存账本。');
+ const next=clone(state),before=state[kind],other=kind==='sales'?'stock':'sales';mutator(next[kind]);
+ const retained=new Set(next[kind].records.map(r=>r.id)),removed=before.records.filter(r=>!retained.has(r.id)&&r.bindingId);
+ const removedItems=new Set(before.items.filter(i=>!next[kind].items.some(j=>j.id===i.id)).map(i=>i.id));
+ const groups=bindingGroups(state),undo=new Set(),detach=new Set();
+ for(const record of removed){
+  const group=groups.get(record.bindingId);if(!group||group.sales.length!==1||group.stock.length!==1||group.sales[0].delta!==-group.stock[0].delta)continue;
+  if(removedItems.has(record.itemId)){detach.add(record.bindingId);continue;}
+  requireThat(kind!=='stock','这是销售联动的库存记录，请到销售历史撤销；库存盘点可直接改数。');
+  undo.add(record.bindingId);
+ }
+ // Deleting a whole category preserves the other book's historical quantities.
+ for(const record of next[other].records)if(detach.has(record.bindingId)){delete record.bindingId;delete record.bindingPart;}
+ const partAdjustments=new Map();
+ for(const id of undo){
+  const record=groups.get(id).stock[0],item=next.stock.items.find(i=>i.id===record.itemId);
+  if(item&&record.bindingPart!==null&&Object.hasOwn(item.breakdown,record.bindingPart)){
+   if(!partAdjustments.has(item.id))partAdjustments.set(item.id,new Map());
+   const parts=partAdjustments.get(item.id);parts.set(record.bindingPart,(parts.get(record.bindingPart)||0)-record.delta);
+  }
+ }
+ for(const [itemId,parts] of partAdjustments){const item=next.stock.items.find(i=>i.id===itemId);for(const [part,delta] of parts){requireThat(item.breakdown[part]+delta>=0,'撤销会让库存分项为负，这次操作没有保存。');item.breakdown[part]+=delta;}}
+ if(undo.size)next.stock.records=next.stock.records.filter(r=>!undo.has(r.bindingId));
+ cleanSalesStockPairs(next);
+ if(kind==='sales'&&salesStockEnabled(next)){
+  const known=new Set(before.records.map(r=>r.id));
+  for(const record of next.sales.records)if(!known.has(record.id)&&record.delta!==0){
+   const sale=next.sales.items.find(i=>i.id===record.itemId),pair=salesStockPair(next,record.itemId);
+   requireThat(pair?.stockId,`${sale?.name||'此品类'}尚未绑定库存，请先到设置选择对应品类。`);
+   writeBindingPair(next.salesStockBinding.pairs,record.itemId,pair);record.bindingId=uid();
+   linkedStockChange(next.stock,pair.stockId,pair.part,-record.delta,record);
+  }
+ }
+ validateState(next);Object.assign(state,next);return state;
+}
+export function deleteBoundRecords(state,kind,ids){
+ return mutateBoundBook(state,kind,book=>{book.records=book.records.filter(r=>!ids.has(r.id));});
+}
+export function replaceBoundBook(state,kind,book){
+ const next=clone(state);next[kind]=clone(book);
+ // An independent book import is a new baseline, not a sale/return event.
+ for(const key of ['sales','stock'])for(const record of next[key].records){delete record.bindingId;delete record.bindingPart;}
+ cleanSalesStockPairs(next);validateState(next);Object.assign(state,next);
+}
 export function parseRatio(text,mode){
  requireThat(typeof text==='string'||typeof text==='number','请输入有效比例。');const value=String(text).trim().replace(',','.');
  if(mode==='parts'){requireThat(/^\d+$/.test(value),'份数须为整数。');const n=Number(value);requireThat(Number.isSafeInteger(n)&&n>0&&n<=1000000,'比例份数须为 1 至 1000000。');return n;}
