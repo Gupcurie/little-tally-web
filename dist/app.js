@@ -55,7 +55,7 @@ function render(){
 function animateEggRecommendation(){
  const box=main.querySelector('.egg-reco');
  if(!box){state.eggMotionKey=null;return;}
- const key=JSON.stringify([state.eggPick?.key,state.eggPick?.id]),previous=state.eggMotionKey;
+ const key=JSON.stringify([state.eggPick?.key,state.eggPick?.id,state.eggPick?.snapshot?.seed]),previous=state.eggMotionKey;
  state.eggMotionKey=key;
  if(!previous||key===previous||matchMedia('(prefers-reduced-motion: reduce)').matches)return;
  box.classList.add('reco-updated');
@@ -161,7 +161,7 @@ function eggStatsView(){
  ${eggActivityChart(buckets,gran)}
  <div class="egg-chart-key"><span><i class="egg-key-add"></i>放入</span><span><i class="egg-key-remove"></i>减回</span></div>
  <p class="hint">${gran==='day'&&state.range===3?'日趋势显示近 30 天；上方指标与下方明细包含全部记录。':gran==='hour'?'点小时柱可查看该小时的 60 分钟。':gran==='minute'?`显示 ${String(data.hour).padStart(2,'0')} 点的 60 分钟。`:''} 手动改数单独计入“手改净量”和明细。</p>${legendRow(egg.items,filter)}</section>
- <section class="panel"><h2>物品数量与本轮进度</h2>${data.items.map(i=>`<div class="egg-stat-item"><div class="rank-title"><button class="egg-stat-name" data-action="stats-filter" data-id="${e(i.id)}">${e(i.name)}</button><strong>累计 ${fmt(i.count)} 个</strong></div><div class="egg-stat-detail">第 ${i.itemRound} 轮 ${i.progress}/${i.ratio} · 放入 ${fmt(i.added)} · 减回 ${fmt(i.removed)} · 手改 ${signed(i.manualNet)}</div><div class="rank-track"><div class="rank-fill" style="width:${Math.min(100,i.progress/i.ratio*100)}%"></div></div><div class="egg-stat-detail">${i.lastPlacedAt?'最近放入 '+e(C.clock(i.lastPlacedAt,true)):'暂无放入记录'}</div></div>`).join('')||'<p class="hint">还没有物品。</p>'}</section>
+ <section class="panel"><h2>物品数量与本轮进度</h2>${data.items.map(i=>`<div class="egg-stat-item"><div class="rank-title"><button class="egg-stat-name" data-action="stats-filter" data-id="${e(i.id)}">${e(i.name)}</button><strong>累计 ${fmt(i.count)} 个</strong></div><div class="egg-stat-detail">第 ${i.itemRound} 轮 ${i.progress}/${i.ratio} · 放入 ${fmt(i.added)} · 减回 ${fmt(i.removed)} · 手改 ${signed(i.manualNet)}</div><div class="rank-track"><div class="rank-fill" style="width:${Math.min(100,i.progress/i.ratio*100)}%"></div></div>${i.overflow?`<div class="egg-overflow" title="超出 ${i.overflow} 个"><span style="width:${Math.min(100,i.overflow/i.ratio*100)}%"></span></div>`:''}<div class="egg-stat-detail">${i.lastPlacedAt?'最近放入 '+e(C.clock(i.lastPlacedAt,true)):'暂无放入记录'}</div></div>`).join('')||'<p class="hint">还没有物品。</p>'}</section>
  <section class="panel"><div class="heading-row"><h2 style="margin:0">操作明细</h2><span class="inline-caption">${fmt(summary.records)} 条</span></div><p class="hint">净变化 = 放入 − 减回 + 手改净量；时间为北京时间。</p>${data.rows.slice(0,limit).map(r=>{const item=egg.items.find(i=>i.id===r.itemId);return `<div class="record-wrap"><div class="row"><span class="record-symbol ${r.delta<0?'negative':''}">${icon(r.delta<0?'minus':'plus')}</span><div class="row-main"><div class="row-title">${e(item?.name||'物品')}</div><div class="row-meta">${e(C.clock(r.at,true))} · ${r.kind==='set'?'手动改数':r.delta<0?'减回':'放入'}</div></div><span class="row-number ${r.delta<0?'red':'green'}">${signed(r.delta)}</span></div></div>`;}).join('')||empty('所选范围没有记录')}${data.rows.length>limit?`<button class="small-button egg-more-records" data-action="egg-stats-more">再显示 ${Math.min(80,data.rows.length-limit)} 条（已显示 ${limit} 条）</button>`:''}</section>`;
 }
 function eggActivityChart(buckets,gran){
@@ -243,14 +243,13 @@ function sinceText(at){
 }
 function eggCard(p,egg){
  const flash=C.eggLastPlaced(egg)===p.id;
- const pct=p.target?Math.min(100,Math.round(p.itemProgress/p.target*100)):0;
  const item=egg.items.find(i=>i.id===p.id)||{};
  return `<article class="egg-card${flash?' flash':''}${state.eggPick?.id===p.id?' recommended':''}" data-egg="${e(p.id)}">
   <button class="egg-open" data-action="egg-detail" data-id="${e(p.id)}" aria-label="查看${e(p.name)}的记录">
    <span class="egg-head"><span class="egg-name">${e(p.name)}</span></span>
    <strong class="egg-count${p.target>=10000?' wide':''}" title="第 ${p.itemRound} 轮 ${p.itemProgress}/${p.target}，累计 ${p.count} 个"><span class="egg-current">${p.itemProgress}</span><small class="egg-denominator">/${p.target}</small></strong>
   </button>
-  <div class="egg-progress" role="progressbar" aria-valuemin="0" aria-valuemax="${p.target}" aria-valuenow="${p.itemProgress}"><span style="width:${pct}%"></span></div>
+  ${eggProgressBars(p)}
   <div class="egg-foot">
    <span class="egg-timer" data-timer="${e(p.id)}" data-timer-prefix="距上次 ">距上次 ${sinceText(C.eggLastChange(egg,p.id))}</span>
    ${state.eggArrange?`<span class="egg-move">
@@ -262,6 +261,10 @@ function eggCard(p,egg){
   </div>
  </article>`;
 }
+function eggProgressBars(p,big=false){
+ const value=p.itemProgress,overflow=Math.max(0,value-p.target),percent=n=>Math.min(100,Math.round(n/p.target*100));
+ return `<div class="egg-progress-stack${big?' big':''}"><div class="egg-progress" role="progressbar" aria-label="${e(p.name)}本轮进度" aria-valuemin="0" aria-valuemax="${p.target}" aria-valuenow="${Math.min(value,p.target)}" aria-valuetext="${value}/${p.target}"><span style="width:${percent(value)}%"></span></div><div class="egg-overflow${overflow?'':' is-empty'}" role="progressbar" aria-label="${e(p.name)}超出本轮数量" aria-valuemin="0" aria-valuemax="${p.target}" aria-valuenow="${Math.min(overflow,p.target)}" aria-valuetext="超出 ${overflow} 个" title="超出 ${overflow} 个"><span style="width:${percent(overflow)}%"></span></div></div>`;
+}
 function eggPickKey(egg){
  const counts=C.eggCounts(egg);
  return JSON.stringify([egg.items.map(i=>[i.id,i.ratio,counts[i.id]]),egg.records.slice(-16).map(r=>r.id)]);
@@ -270,8 +273,9 @@ function eggPickId(egg){
  const key=eggPickKey(egg),storedMark=JSON.stringify(egg.recommendation||null);
  if(state.eggPick?.key===key&&state.eggPick.storedMark===storedMark&&egg.items.some(i=>i.id===state.eggPick.id))return state.eggPick.id;
  const saved=C.eggStoredPlan(egg),picks=C.eggRecommendationSet(egg,egg.items.length).map(p=>p.id);
- const id=saved?C.eggSavedSequence(saved).next().value:picks[0];
- state.eggPick=id?{key,id,picks:[id,...picks.filter(p=>p!==id)],alternative:false,storedMark,snapshot:saved||C.eggCreatePlan(egg,{firstId:id})}:null;
+ const snapshot=saved?.version===2?saved:C.eggCreatePlan(egg);
+ const id=picks.length?C.eggSavedSequence(snapshot).next().value:null;
+ state.eggPick=id?{key,id,picks:[id,...picks.filter(p=>p!==id)],alternative:false,storedMark,snapshot}:null;
  return state.eggPick?.id||null;
 }
 function eggReroll(egg){
@@ -295,8 +299,10 @@ function extendEggPlan(plan){
  while(plan.ids.length<end){const next=plan.iterator.next();if(next.done)break;plan.ids.push(next.value);}
 }
 function regenerateEggPlan(egg){
- const picks=C.eggRecommendationSet(egg,egg.items.length).map(p=>p.id);
- state.eggPick=picks.length?{key:eggPickKey(egg),id:picks[0],picks,alternative:false,storedMark:JSON.stringify(egg.recommendation||null),snapshot:C.eggCreatePlan(egg,{firstId:picks[0]})}:null;
+ const old=eggPlan(egg),previous=[],iterator=C.eggSavedSequence(old.snapshot);
+ while(previous.length<Math.min(512,old.total)){const next=iterator.next();if(next.done)break;previous.push(next.value);}
+ const snapshot=C.eggCreatePlan(egg,{previous}),id=snapshot.order[0],picks=C.eggRecommendationSet(egg,egg.items.length).map(p=>p.id);
+ state.eggPick=id?{key:eggPickKey(egg),id,picks:[id,...picks.filter(p=>p!==id)],alternative:false,storedMark:JSON.stringify(egg.recommendation||null),snapshot}:null;
  state.eggPlan=null;return eggPlan(egg);
 }
 function advanceEggPlan(egg,plan,placedId){
@@ -313,7 +319,7 @@ function advanceEggPlan(egg,plan,placedId){
 }
 function showEggPlan(){
  const egg=eggBook(),plan=eggPlan(egg),names=Object.fromEntries(egg.items.map(i=>[i.id,i.name]));
- showSheet('本轮推荐顺序',`<section data-egg-plan><p class="egg-plan-sync" data-egg-plan-sync>${eggPlanStatus()}</p><div class="egg-plan-heading"><span>第 ${plan.round} 轮 · 还需 ${fmt(plan.total)} 个</span><button type="button" class="small-button" data-action="egg-plan-refresh">重新生成本轮顺序</button></div><p class="hint">按顺序放入会推进到下一件；放了别的物品、减回或改数后会重新计算。</p><ol class="egg-plan-list">${plan.ids.map((id,i)=>`<li${i===0?' class="next"':''}><span>${i===0?'下一个':'第 '+(i+1)+' 个'}</span><strong>${e(names[id]||'物品')}</strong></li>`).join('')}</ol>${plan.ids.length<plan.total?`<button type="button" class="secondary-button egg-plan-more" data-action="egg-plan-more">继续显示（还有 ${fmt(plan.total-plan.ids.length)} 个）</button>`:'<p class="egg-plan-end">本轮结束</p>'}</section>`);
+ showSheet('本轮推荐顺序',`<section data-egg-plan><p class="egg-plan-sync" data-egg-plan-sync>${eggPlanStatus()}</p><div class="egg-plan-heading"><span>第 ${plan.round} 轮 · 还需 ${fmt(plan.total)} 个</span><button type="button" class="small-button" data-action="egg-plan-refresh">重新生成本轮顺序</button></div><p class="hint">按顺序放入会推进到下一件；放了别的物品、减回或改数后会重新计算。</p>${plan.snapshot.comparison?.limited?'<p class="hint egg-plan-limit">本次重排变化较小，剩余配额和间隔要求限制较多。</p>':''}<ol class="egg-plan-list">${plan.ids.map((id,i)=>`<li${i===0?' class="next"':''}><span>${i===0?'下一个':'第 '+(i+1)+' 个'}</span><strong>${e(names[id]||'物品')}</strong></li>`).join('')}</ol>${plan.ids.length<plan.total?`<button type="button" class="secondary-button egg-plan-more" data-action="egg-plan-more">继续显示（还有 ${fmt(plan.total-plan.ids.length)} 个）</button>`:'<p class="egg-plan-end">本轮结束</p>'}</section>`);
 }
 function refreshEggPlan(){
  if(sheet.open&&sheetContent.querySelector('[data-egg-plan]')){if(state.eggPlan?.key!==eggPlanKey(eggBook()))showEggPlan();const status=sheetContent.querySelector('[data-egg-plan-sync]');if(status)status.textContent=eggPlanStatus();}
@@ -337,13 +343,12 @@ function queueEggPlanSync(){
 function eggView(){
  const egg=eggBook();
  if(!egg.items.length)return `<section class="egg-empty">${icon('egg')}<strong>还没有放蛋物品</strong><div class="egg-empty-actions"><button class="primary-button" data-action="egg-add-item">添加物品</button><button class="secondary-button" data-action="page" data-page="ratio">设置比例</button></div></section>`;
- const off=state.eggRoundView?1:0;
- const progress=C.eggProgress(egg).map(p=>{if(!off)return p;const round=p.round+off,value=Math.min(p.ratio,Math.max(0,p.count-round*p.ratio));return {...p,round,itemRound:round+1,itemProgress:value,left:p.ratio-value};});
+ const progress=C.eggProgress(egg);
  const byId=Object.fromEntries(progress.map(p=>[p.id,p])),ids=eggOrder(egg).filter(id=>byId[id]);
  const shown=state.eggOnlyLeft?ids.filter(id=>byId[id].left>0):ids;
  const pickId=eggPickId(egg),pick=pickId?byId[pickId]:null,round=C.eggRound(egg)+1;
  return `<section class="egg-wrap">
-  <div class="egg-statusbar"><img class="egg-mark" src="./icon-192.png" alt="火星演唱会标志"><div class="egg-status"><span data-testid="egg-round">第 <strong>${round}</strong> 轮</span><span data-testid="egg-total">总数 <strong>${fmt(C.eggTotal(egg))}</strong> 个</span>${off?'<span class="preview-label">预览下一轮</span>':''}</div><button class="small-button egg-tools" data-action="${state.eggArrange?'egg-arrange':'egg-tools'}">${state.eggArrange?'完成':icon('settings')+'操作'}</button></div>
+  <div class="egg-statusbar"><img class="egg-mark" src="./icon-192.png" alt="火星演唱会标志"><div class="egg-status"><span data-testid="egg-round">第 <strong>${round}</strong> 轮</span><span data-testid="egg-total">总数 <strong>${fmt(C.eggTotal(egg))}</strong> 个</span></div><button class="small-button egg-tools" data-action="${state.eggArrange?'egg-arrange':'egg-tools'}">${state.eggArrange?'完成':icon('settings')+'操作'}</button></div>
   <div class="egg-reco"><button class="egg-reco-main" data-action="egg-plan" aria-label="查看本轮推荐顺序"><span class="eyebrow">${state.eggPick?.alternative?'备选':'推荐'}</span><strong>${pick?e(pick.name):'—'}</strong>${icon('arrow','tiny')}</button><div class="egg-reco-actions">${pick?`<button class="egg-add-main" data-action="egg-add" data-id="${e(pick.id)}">+1</button>`:''}<button class="ghost small" data-action="egg-reroll">换一个</button></div></div>
   <div class="egg-grid" data-columns="${state.eggCols}">${shown.length?shown.map(id=>eggCard(byId[id],egg)).join(''):`<p class="egg-none">没有未放满的物品。<button class="small-button" data-action="egg-only">显示全部</button></p>`}</div>
  </section>`;
@@ -357,7 +362,7 @@ function eggDetailView(){
  <section class="panel egg-detail-head">
   <div class="heading-row"><button class="egg-title" data-action="egg-rename" data-id="${e(item.id)}">${e(item.name)}${icon('edit','tiny')}</button><span class="badge">第 ${round} 轮 · 比例 ${p.ratio}</span></div>
   <div class="egg-detail-numbers"><div><small>累计</small><strong>${fmt(p.count)}</strong></div><div><small>本轮</small><strong>${p.itemProgress}/${p.target}</strong></div><div><small>距上次</small><strong data-timer="${e(p.id)}">${sinceText(C.eggLastChange(egg,p.id))}</strong></div></div>
-  <div class="egg-progress big" role="progressbar" aria-valuemin="0" aria-valuemax="${p.target}" aria-valuenow="${p.itemProgress}"><span style="width:${Math.min(100,Math.round(p.itemProgress/p.target*100))}%"></span></div>
+  ${eggProgressBars(p,true)}
   <div class="egg-actions-row"><button class="egg-big minus" data-action="egg-minus" data-id="${e(p.id)}">−1</button><button class="egg-big plus" data-action="egg-add" data-id="${e(p.id)}">+1</button></div>
   <p class="hint">点名字可以改名；下一轮需要 ${p.ratio} 个；全部共 ${fmt(C.eggTotal(egg))} 个。</p>
  </section>
@@ -431,7 +436,7 @@ function backupFilename(label){return `拆弹专家-${label}-${C.day(Date.now())
 function report(){const sales=ledger.state.sales,stock=ledger.state.stock,t=C.counts({...sales,records:C.todayRecords(sales)}),s=C.counts(stock);return `拆弹专家｜${C.day(Date.now())}\n\n【今天的记数】\n${sales.items.map(i=>`${i.name}：${t[i.id]} 件`).join('\n')}\n\n【当前库存数】\n${stock.items.map(i=>`${i.name}：${s[i.id]} 件`).join('\n')}\n\n时间使用北京时间，销售与库存独立。`;}
 function installHelp(){const isIOS=/iPad|iPhone|iPod/.test(navigator.userAgent);showSheet('把拆弹专家放进口袋',`<p>添加到主屏幕后，就能像 App 一样从图标打开。</p><ol class="install-steps"><li>${isIOS?'请用 Safari 打开这个网页。':'在手机浏览器中打开这个网页。'}</li><li>${isIOS?'点击浏览器的“分享”按钮。':'打开浏览器菜单，选择“安装应用”或“添加到主屏幕”。'}</li><li>${isIOS?'选择“添加到主屏幕”，如有“作为网页 App 打开”请开启。':'确认名称为“拆弹专家”，完成添加。'}</li></ol><div class="soft-message">建议先添加再正式记数，并固定使用同一个入口。如果已有记录，请先在设置里导出备份，再在主屏幕版导入。</div><button class="primary-button" type="button" data-action="close-sheet">知道了</button>`);}
 async function action(a,node){
- if(sheet.open&&['page','egg-arrange','egg-only','egg-next-round'].includes(a))closeSheet();
+ if(sheet.open&&['page','egg-arrange','egg-only'].includes(a))closeSheet();
  const id=node.dataset.id,part=node.dataset.part;
  if(a==='check-connection'){const message=document.querySelector('#connection-message');node.disabled=true;if(message)message.textContent='正在检查，请稍候…';try{const rows=await probeConnection(cloudConfig);if(message?.isConnected)message.textContent=rows.map(x=>x.name+'：'+x.detail).join('\n')+'\n'+(rows.every(x=>x.ok)?'网络已连通，可以尝试注册或登录。':'请截取这些检查结果，方便定位连接问题。');}finally{if(node.isConnected)node.disabled=false;}return;}
  if(a==='auth-mode'){state.authMode=state.authMode==='register'?'login':'register';ledger.error=null;render();return;}
@@ -444,10 +449,9 @@ async function action(a,node){
  if(a==='install'){installHelp();return;}
  if(a==='detail'){state.itemID=id;render();window.scrollTo({top:0});return;}
  if(a==='detail-back'){state.itemID=null;render();return;}
- if(a==='egg-tools'){showSheet('放蛋操作',`<button class="list-button" type="button" data-action="egg-add-item">${icon('plus')}<span>添加物品</span>${icon('arrow','chevron')}</button><button class="list-button" type="button" data-action="page" data-page="ratio" data-book="egg">${icon('ratio')}<span>设置比例</span>${icon('arrow','chevron')}</button><button class="list-button" type="button" data-action="egg-arrange">${icon('count')}<span>排列卡片</span>${icon('arrow','chevron')}</button><button class="list-button" type="button" data-action="egg-only">${icon('target')}<span>${state.eggOnlyLeft?'显示全部物品':'只看本轮还缺的'}</span>${icon('arrow','chevron')}</button><button class="list-button" type="button" data-action="egg-next-round">${icon('history')}<span>${state.eggRoundView?'回到本轮':'预览下一轮'}</span>${icon('arrow','chevron')}</button>`);return;}
+ if(a==='egg-tools'){showSheet('放蛋操作',`<button class="list-button" type="button" data-action="egg-add-item">${icon('plus')}<span>添加物品</span>${icon('arrow','chevron')}</button><button class="list-button" type="button" data-action="page" data-page="ratio" data-book="egg">${icon('ratio')}<span>设置比例</span>${icon('arrow','chevron')}</button><button class="list-button" type="button" data-action="egg-arrange">${icon('count')}<span>排列卡片</span>${icon('arrow','chevron')}</button><button class="list-button" type="button" data-action="egg-only">${icon('target')}<span>${state.eggOnlyLeft?'显示全部物品':'只看本轮还缺的'}</span>${icon('arrow','chevron')}</button>`);return;}
  if(a==='egg-add'){const id=node.dataset.id;await mutateEgg(egg=>C.eggChange(egg,id,1),{placedId:id});return;}
  if(a==='egg-minus'){const id=node.dataset.id;try{await mutateEgg(egg=>C.eggChange(egg,id,-1));}catch(err){toast(err.message);}return;}
- if(a==='egg-next-round'){state.eggRoundView=state.eggRoundView?0:1;render();return;}
  if(a==='egg-rename'){const item=eggBook().items.find(i=>i.id===id);if(!item)return;showSheet('修改名字',`<label class="field-label" for="name">物品名称</label><input class="field-input" id="name" name="name" maxlength="40" value="${e(item.name)}">`,async fd=>{await mutateEgg(egg=>C.eggRename(egg,id,String(fd.get('name')||'')));return true;});return;}
  if(a==='stats-gran'){state.statsGran=node.dataset.gran;render();return;}
  if(a==='stats-filter'){const id=node.dataset.id||null;state.statsItem=state.statsItem===id?null:id;if(state.book!=='egg')state.range=0;state.selectedHour=null;state.eggStatsLimit=80;render();return;}

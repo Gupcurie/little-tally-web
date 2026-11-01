@@ -122,3 +122,14 @@ button.egg-reco-main{align-self:stretch;text-align:left;background:transparent;c
 .egg-plan-more{width:100%;margin-top:14px}
 
 .egg-plan-sync{font-size:11px;color:#298b5d;margin:0 0 12px}
+
+.egg-progress-stack{display:flex;flex-direction:column;gap:2px;flex:none;min-width:0}
+.egg-progress-stack .egg-progress{height:4px}
+.egg-overflow{height:3px;background:#fff1c8;border-radius:5px;overflow:hidden;flex:none}
+.egg-overflow>span{display:block;height:100%;background:#e5b12b;border-radius:5px}
+.egg-overflow.is-empty{visibility:hidden}
+.egg-progress-stack.big{gap:4px;margin-top:15px}
+.egg-progress-stack.big .egg-progress{height:7px;margin:0}
+.egg-progress-stack.big .egg-overflow{height:5px}
+.egg-stat-item>.egg-overflow{margin-top:3px}
+.egg-plan-limit{color:#916b17;background:#fff8df;border-radius:9px;padding:9px 11px}

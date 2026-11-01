@@ -1,4 +1,4 @@
-const VERSION='little-tally-shell-v13-egg-plan';
+const VERSION='little-tally-shell-v14-global-overflow';
 const ROOT=new URL('./',self.location).href;
 const ASSETS=['./','./index.html','./style.css','./app.js','./core.js','./plan-random.js','./account.js','./connection.js','./storage.js','./cloud.js','./cloud-config.js','./vendor/supabase.js','./manifest.webmanifest','./assets/mars-floral.jpg','./assets/mars-identity.jpg','./icon.svg','./icon-192.png','./icon-512.png'];
 self.addEventListener('install',event=>{event.waitUntil((async()=>{const cache=await caches.open(VERSION);await cache.addAll(ASSETS);})());});

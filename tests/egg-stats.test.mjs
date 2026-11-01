@@ -57,30 +57,34 @@ test('per-round fractions roll over while cumulative quantities remain intact',(
  assert.equal(s.total,9);assert.equal(s.currentRound,2);
 });
 
-test('each item starts its next round on the placement after its quota is full',()=>{
- const egg=C.emptyEgg();C.eggAddItem(egg,'甲',8);C.eggAddItem(egg,'乙',2);
+test('overflow stays in the global round and carries forward only after every item reaches its quota',()=>{
+ const egg=C.emptyEgg();C.eggAddItem(egg,'甲',6);C.eggAddItem(egg,'乙',2);
  const [a,b]=egg.items;
- for(const [count,round,progress] of [[0,1,0],[8,1,8],[9,2,1],[16,2,8],[17,3,1],[8,1,8]]){
+ for(const count of [0,6,7,12,13,7]){
   C.eggSetCount(egg,a.id,count);
-  const p=C.eggProgress(egg).find(i=>i.id===a.id);
-  assert.equal(p.itemRound,round);assert.equal(p.itemProgress,progress);
-  assert.equal(C.eggRound(egg),0);assert.equal(p.left,Math.max(0,8-count));
-  const stats=C.eggStatistics(egg).items.find(i=>i.id===a.id);
-  assert.equal(stats.itemRound,round);assert.equal(stats.progress,progress);
-  if(count>=8)assert.equal(C.eggRecommend(egg).id,b.id);
+  const p=C.eggProgress(egg)[0],stats=C.eggStatistics(egg).items[0];
+  assert.equal(p.itemRound,1);assert.equal(p.itemProgress,count);assert.equal(p.overflow,Math.max(0,count-6));
+  assert.equal(stats.progress,count);assert.equal(stats.overflow,Math.max(0,count-6));
+  if(count>=6)assert.equal(C.eggRecommend(egg).id,b.id);
  }
+ C.eggSetCount(egg,b.id,2);
+ assert.equal(C.eggRound(egg),1);
+ assert.deepEqual(C.eggProgress(egg).map(p=>[p.itemRound,p.itemProgress,p.overflow]),[[2,1,0],[2,0,0]]);
+ C.eggChange(egg,b.id,-1);
+ assert.deepEqual(C.eggProgress(egg).map(p=>[p.itemRound,p.itemProgress,p.overflow]),[[1,7,1],[1,1,0]]);
 });
 
-test('exact multiples stay full even when all items have completed a global round',()=>{
+test('all exact quotas enter the next global round together, including ratio one',()=>{
  const egg=C.emptyEgg();C.eggAddItem(egg,'甲',8);C.eggAddItem(egg,'乙',1);
  C.eggSetCount(egg,egg.items[0].id,8);C.eggSetCount(egg,egg.items[1].id,1);
  assert.equal(C.eggRound(egg),1);
- assert.deepEqual(C.eggProgress(egg).map(p=>[p.itemRound,p.itemProgress]),[[1,8],[1,1]]);
+ assert.deepEqual(C.eggProgress(egg).map(p=>[p.itemRound,p.itemProgress]),[[2,0],[2,0]]);
  C.eggChange(egg,egg.items[1].id,1);
  assert.equal(C.eggProgress(egg)[1].itemRound,2);
  assert.equal(C.eggProgress(egg)[1].itemProgress,1);
  assert.equal(C.eggRecommend(egg).id,egg.items[0].id);
 });
+
 test('statistics are read-only and tolerate empty books',()=>{
  const {egg}=fixture(),before=JSON.stringify(egg);C.eggStatistics(egg,{now:NOW});
  assert.equal(JSON.stringify(egg),before);
@@ -105,15 +109,18 @@ test('the real card template places the denominator beside the round count at al
  assert.match(markup,/累计 7 个/);
 });
 
-test('an item ahead of other items renders its own fraction and progress bar',()=>{
+test('an over-quota item keeps its global fraction, a full main bar and a yellow overflow bar',()=>{
  const egg=C.emptyEgg();C.eggAddItem(egg,'甲',8);C.eggAddItem(egg,'乙',2);
  C.eggSetCount(egg,egg.items[0].id,9);
  const context=vm.createContext({C,state:{eggArrange:false},fmt:String,e:escape,sinceText:()=>'',icon:()=>''});
  vm.runInContext(extracted('eggCard','eggPickKey'),context);
  const markup=context.eggCard(C.eggProgress(egg)[0],egg);
- assert.match(markup,/第 2 轮 1\/8，累计 9 个/);
- assert.match(markup,/class="egg-current">1<\/span><small class="egg-denominator">\/8/);
- assert.match(markup,/aria-valuenow="1"/);
+ assert.match(markup,/第 1 轮 9\/8，累计 9 个/);
+ assert.match(markup,/class="egg-current">9<\/span><small class="egg-denominator">\/8/);
+ assert.match(markup,/aria-valuenow="8"/);
+ assert.match(markup,/width:100%/);
+ assert.match(markup,/class="egg-overflow"/);
+ assert.match(markup,/超出 1 个/);
  assert.match(markup,/width:13%/);
 });
 test('statistics render in day, hour and minute views, including per-item and operation detail',()=>{
@@ -126,7 +133,7 @@ test('statistics render in day, hour and minute views, including per-item and op
  for(const gran of ['day','hour','minute']){
   context.state.statsGran=gran;const markup=context.eggStatsView();
   assert.match(markup,/操作明细/);assert.match(markup,/手动改数/);assert.match(markup,/物品数量与本轮进度/);
-  assert.match(markup,/第 1 轮 6\/6/);assert.match(markup,/2026/);
+  assert.match(markup,/第 2 轮 0\/6/);assert.match(markup,/2026/);
  }
 });
 test('recommendation feedback runs once after data or selection changes, respecting reduced motion',()=>{

@@ -137,12 +137,7 @@ export function eggRound(egg){
 }
 export function eggProgress(egg){
  const c=eggCounts(egg),round=eggRound(egg);
- return egg.items.map(i=>({id:i.id,name:i.name,ratio:i.ratio,count:c[i.id],round,progress:c[i.id]-round*i.ratio,left:Math.max(0,i.ratio-(c[i.id]-round*i.ratio)),target:i.ratio,...eggItemCycle(c[i.id],i.ratio)}));
-}
-// Keep a completed item at 8/8; its ninth placement starts its own next round.
-export function eggItemCycle(count,ratio){
- const itemRound=Math.max(1,Math.ceil(count/ratio));
- return {itemRound,itemProgress:count-(itemRound-1)*ratio};
+ return egg.items.map(i=>{const progress=c[i.id]-round*i.ratio;return {id:i.id,name:i.name,ratio:i.ratio,count:c[i.id],round,progress,left:Math.max(0,i.ratio-progress),target:i.ratio,itemRound:round+1,itemProgress:progress,overflow:Math.max(0,progress-i.ratio)};});
 }
 export function eggRoundComplete(egg){return eggProgress(egg).every(p=>p.left===0);}
 export function eggLastPlaced(egg){const sorted=egg.records.slice().sort((a,b)=>a.at-b.at);return sorted.length?sorted[sorted.length-1].itemId:null;}
@@ -286,11 +281,97 @@ function* eggContextSequence(context,random,firstId){
  while(true){
   const pick=first||eggRecommendationChoices(context,1,random)[0];first=null;
   if(!pick)return;
-  c[pick.id]++;
-  for(const [id,gap] of gaps)gaps.set(id,gap+1);
-  gaps.set(pick.id,1);recent.unshift(pick.id);recent.length=Math.min(3,recent.length);
+  eggApplyPick(context,pick.id);
   yield pick.id;
  }
+}
+function eggApplyPick(context,id){
+ context.c[id]++;
+ for(const [key,gap] of context.gaps)context.gaps.set(key,gap+1);
+ context.gaps.set(id,1);context.recent.unshift(id);context.recent.length=Math.min(3,context.recent.length);
+}
+// Score a complete ordering, without requiring equally spaced fixed positions.
+function eggSequenceQuality(context,order){
+ const gaps=new Map(context.gaps),recent=context.recent.slice(),total=sum(context.items.map(i=>i.ratio));
+ const periods=new Map(context.items.map(i=>[i.id,total/i.ratio]));
+ let repeats=0,minorRepeats=0,rareClose=0,spacing=0,alternating=0,streak=0,maxRun=0,last=recent[0];
+ for(const id of recent){if(id!==last)break;streak++;}
+ for(const id of order){
+  const period=periods.get(id),gap=gaps.get(id)??Infinity;
+  if(recent[0]===id){repeats++;if(period>=2)minorRepeats++;}
+  streak=last===id?streak+1:1;last=id;maxRun=Math.max(maxRun,streak);
+  if(period>=4&&gap<Math.floor(period*.5))rareClose++;
+  spacing+=Math.min(6,Math.sqrt(period))*Math.max(0,1-gap/period)**2;
+  if(recent.length===3&&id===recent[1]&&recent[0]===recent[2]&&id!==recent[0])alternating++;
+  for(const [key,n] of gaps)gaps.set(key,n+1);
+  gaps.set(id,1);recent.unshift(id);recent.length=Math.min(3,recent.length);
+ }
+ return {repeats,minorRepeats,rareClose,maxRun,energy:spacing+.7*alternating+.9*repeats};
+}
+function eggSequenceDistance(a,b){
+ const n=Math.min(a.length,b.length);if(!n)return {changed:0,value:0};
+ let changed=0;for(let k=0;k<n;k++)if(a[k]!==b[k])changed++;
+ const row=new Uint16Array(n+1);
+ for(let i=0;i<n;i++){let previous=0;for(let j=1;j<=n;j++){const old=row[j];row[j]=a[i]===b[j-1]?previous+1:Math.max(row[j],row[j-1]);previous=old;}}
+ const pairs=new Map();for(let k=1;k<n;k++){const key=b[k-1]+'|'+b[k];pairs.set(key,(pairs.get(key)||0)+1);}
+ let shared=0;for(let k=1;k<n;k++){const key=a[k-1]+'|'+a[k],left=pairs.get(key)||0;if(left){shared++;pairs.set(key,left-1);}}
+ return {changed,value:.4*changed/n+.35*(1-row[n]/n)+.25*(n>1?1-shared/(n-1):changed)};
+}
+function eggWholeRound(context,random,{firstId,previous,total}){
+ const size=Math.min(512,total),candidates=new Map();
+ if(!size)return {order:[],comparison:null};
+ const counts=context.items.map(i=>Math.max(0,(context.round+1)*i.ratio-context.c[i.id]));
+ const ids=context.items.map(i=>i.id),byId=new Map(ids.map((id,k)=>[id,k]));
+ if(!byId.has(firstId)||!counts[byId.get(firstId)])firstId=null;
+ const valid=order=>{
+  if(!Array.isArray(order)||order.length!==size||(firstId&&order[0]!==firstId))return false;
+  const used=Array(ids.length).fill(0);for(const id of order){const k=byId.get(id);if(k===undefined||++used[k]>counts[k])return false;}return true;
+ };
+ const add=order=>{if(valid(order)){const key=order.join('|');if(!candidates.has(key))candidates.set(key,{order,quality:eggSequenceQuality(context,order)});}};
+ const prior=previous?.slice(0,size);if(valid(prior))add(prior);
+ const factorial=n=>{let v=1;for(let k=2;k<=n;k++)v*=k;return v;};
+ const ways=total<=10?factorial(total)/counts.reduce((v,n)=>v*factorial(n),1):Infinity;
+ const exact=ways<=10000;
+ if(exact){
+  const left=counts.slice(),order=[];
+  const visit=()=>{if(order.length===size){add(order.slice());return;}for(let k=0;k<ids.length;k++)if(left[k]&&(!firstId||order.length||ids[k]===firstId)){left[k]--;order.push(ids[k]);visit();order.pop();left[k]++;}};
+  visit();
+ }else{
+  const attempts=Math.max(4,Math.min(24,Math.floor(250000/(Math.max(1,ids.length**2)*size))));
+  for(let trial=0;trial<attempts;trial++){
+   const copy={...context,c:{...context.c},gaps:new Map(context.gaps),recent:context.recent.slice()};
+   const iterator=eggContextSequence(copy,random,firstId),order=[];
+   while(order.length<size){const next=iterator.next();if(next.done)break;order.push(next.value);}add(order);
+  }
+  const bases=[...candidates.values()];
+  for(let trial=0;trial<attempts*3;trial++){
+   const order=bases[Math.floor(random()*bases.length)].order.slice(),start=firstId?1:0;
+   if(size-start>1){
+    if(trial%3===0){for(let k=size-1;k>start;k--){const j=start+Math.floor(random()*(k-start+1));[order[k],order[j]]=[order[j],order[k]];}}
+    else for(let k=0;k<2+trial%7;k++){const a=start+Math.floor(random()*(size-start)),b=start+Math.floor(random()*(size-start));[order[a],order[b]]=[order[b],order[a]];}
+   }
+   add(order);
+  }
+ }
+ let good=[...candidates.values()];
+ const minorRepeats=Math.min(...good.map(c=>c.quality.minorRepeats));good=good.filter(c=>c.quality.minorRepeats===minorRepeats);
+ const repeats=Math.min(...good.map(c=>c.quality.repeats)),dominant=context.items.some(i=>i.ratio/sum(context.items.map(j=>j.ratio))>.5);
+ // A dominant item may use one extra pair on an explicit reroll. Otherwise a
+ // near-alternating tiny round can have only one acceptable arrangement.
+ good=good.filter(c=>c.quality.repeats<=repeats+(valid(prior)&&dominant?1:0));
+ const maxRun=Math.min(...good.map(c=>c.quality.maxRun));good=good.filter(c=>c.quality.maxRun<=Math.max(2,maxRun));
+ const rareClose=Math.min(...good.map(c=>c.quality.rareClose));good=good.filter(c=>c.quality.rareClose===rareClose);
+ const best=Math.min(...good.map(c=>c.quality.energy));good=good.filter(c=>c.quality.energy<=best+Math.max(1.6,size*.03));
+ let comparison=null;
+ if(valid(prior)){
+  good.forEach(c=>c.distance=eggSequenceDistance(c.order,prior));
+  const farthest=Math.max(...good.map(c=>c.distance.value)),mostChanged=Math.max(...good.map(c=>c.distance.changed));
+  const diverse=good.filter(c=>c.distance.value>=farthest*.8&&c.distance.changed>=Math.min(size*.6,mostChanged*.9));
+  if(diverse.length)good=diverse;
+  comparison={compared:size,alternatives:good.length,exact,limited:mostChanged<size*.5};
+ }
+ const selected=good[Math.min(good.length-1,Math.floor(random()*good.length))];
+ return {order:selected.order,comparison:comparison?{...comparison,changed:selected.distance.changed}:null};
 }
 export function eggRecommendationKey(egg){
  const counts=eggCounts(egg);
@@ -298,15 +379,17 @@ export function eggRecommendationKey(egg){
 }
 const packEggContext=context=>({...context,gaps:[...context.gaps]});
 const unpackEggContext=value=>({...clone(value),gaps:new Map(value.gaps)});
-export function eggCreatePlan(egg,{firstId=null}={}){
+export function eggCreatePlan(egg,{firstId=null,previous=null}={}){
  const context=eggRecommendationContext(egg);
- return {version:1,key:eggRecommendationKey(egg),context:packEggContext(context),seed:planSeed(),offset:0,firstId,
+ const plan={version:2,key:eggRecommendationKey(egg),context:packEggContext(context),seed:planSeed(),offset:0,firstId,
   total:sum(context.items.map(i=>Math.max(0,(context.round+1)*i.ratio-context.c[i.id]))),at:Date.now()};
+ const result=eggWholeRound(context,planRandom(plan.seed),{firstId,previous,total:plan.total});
+ return {...plan,order:result.order,comparison:result.comparison};
 }
 export function eggStoredPlan(egg){
  const p=egg.recommendation;
  try{
-  if(!p||p.version!==1||p.key!==eggRecommendationKey(egg)||!Number.isSafeInteger(p.total)||p.total<1||p.total>200000000)return null;
+  if(!p||![1,2].includes(p.version)||p.key!==eggRecommendationKey(egg)||!Number.isSafeInteger(p.total)||p.total<1||p.total>200000000)return null;
   if(!Number.isSafeInteger(p.offset)||p.offset<0||p.offset>200000000000||!validTime(p.at))return null;
   planRandom(p.seed,p.offset);
   const c=p.context,ids=new Set(egg.items.map(i=>i.id));
@@ -317,11 +400,18 @@ export function eggStoredPlan(egg){
   const counts=eggCounts(egg);
   if(!c.items.every(i=>counts[i.id]===c.c[i.id]))return null;
   if(p.total!==sum(c.items.map(i=>Math.max(0,(c.round+1)*i.ratio-c.c[i.id]))))return null;
+  if(p.version===2){
+   if(!Array.isArray(p.order)||p.order.length>Math.min(512,p.total))return null;
+   const used={};for(const id of p.order){if(!ids.has(id))return null;used[id]=(used[id]||0)+1;}
+   if(c.items.some(i=>(used[i.id]||0)>Math.max(0,(c.round+1)*i.ratio-c.c[i.id])))return null;
+  }
   return p;
  }catch{return null;}
 }
 export function* eggSavedSequence(plan){
- yield* eggContextSequence(unpackEggContext(plan.context),planRandom(plan.seed,plan.offset),plan.firstId);
+ const context=unpackEggContext(plan.context);
+ if(plan.version===2)for(const id of plan.order){eggApplyPick(context,id);yield id;}
+ yield* eggContextSequence(context,planRandom(plan.seed,plan.offset),plan.version===2?null:plan.firstId);
 }
 export function eggAdvancePlan(egg,plan,placedId){
  const last=egg.records.at(-1);
@@ -329,15 +419,16 @@ export function eggAdvancePlan(egg,plan,placedId){
  const prior={...egg,records:egg.records.slice(0,-1),recommendation:plan};
  if(!eggStoredPlan(prior))return null;
  const context=unpackEggContext(plan.context),random=planRandom(plan.seed,plan.offset);
- if(eggContextSequence(context,random,plan.firstId).next().value!==placedId)return null;
- return {...plan,key:eggRecommendationKey(egg),context:packEggContext(context),offset:random.position,firstId:null,total:plan.total-1,at:Date.now()};
+ if(plan.version===2&&plan.order.length){if(plan.order[0]!==placedId)return null;eggApplyPick(context,placedId);}
+ else if(eggContextSequence(context,random,plan.version===2?null:plan.firstId).next().value!==placedId)return null;
+ return {...plan,key:eggRecommendationKey(egg),context:packEggContext(context),offset:random.position,firstId:null,total:plan.total-1,at:Date.now(),...(plan.version===2?{order:plan.order.slice(1),comparison:null}:{})};
 }
 // Read-only statistics. A physical placement, a removal and a manual correction
 // are distinct operations; their deltas still all contribute to the current count.
 export function eggStatistics(egg,{range=0,itemId=null,now=Date.now(),hour=null}={}){
  const today=day(now),start=range===3?'':day(now-(range===1?6:range===2?29:0)*86400000);
  const counts=eggCounts(egg),round=egg.items.length?Math.min(...egg.items.map(i=>Math.floor(counts[i.id]/i.ratio))):0;
- const items=egg.items.map(i=>({...i,count:counts[i.id],progress:eggItemCycle(counts[i.id],i.ratio).itemProgress,...eggItemCycle(counts[i.id],i.ratio),
+ const items=egg.items.map(i=>({...i,count:counts[i.id],progress:counts[i.id]-round*i.ratio,itemProgress:counts[i.id]-round*i.ratio,itemRound:round+1,overflow:Math.max(0,counts[i.id]-(round+1)*i.ratio),
   left:Math.max(0,i.ratio-(counts[i.id]-round*i.ratio)),added:0,removed:0,manualNet:0,net:0,records:0,lastPlacedAt:0}));
  const byId=Object.fromEntries(items.map(i=>[i.id,i]));
  const blank=()=>({added:0,removed:0,manualNet:0,net:0,records:0});
