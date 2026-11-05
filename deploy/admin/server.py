@@ -10,6 +10,7 @@ import csv
 import hashlib
 import hmac
 import io
+import ipaddress
 import json
 import os
 import re
@@ -172,6 +173,12 @@ def ledger_stats(payload):
     return result
 
 
+def fetch_teams():
+    status, rows = supabase('/rest/v1/rpc/tally_admin_teams', method='POST', body={})
+    if status != 200 or not isinstance(rows, list):
+        raise RuntimeError('group list unavailable')
+    return [r for r in rows if isinstance(r, dict) and r.get('id') and 'payload' in r]
+
 def fetch_ledgers(ids):
     """Return {user_id: ledger row} for the given account ids."""
     if not ids:
@@ -181,7 +188,13 @@ def fetch_ledgers(ids):
                             '&user_id=in.(%s)' % expr)
     if status != 200 or not isinstance(rows, list):
         raise RuntimeError('ledger read failed')
-    return {row.get('user_id'): row for row in rows}
+    result = {row.get('user_id'): row for row in rows}
+    missing = set(ids) - set(result)
+    if missing:
+        for team in fetch_teams():
+            if team['id'] in missing:
+                result[team['id']] = team
+    return result
 
 
 def item_totals(book):
@@ -228,6 +241,39 @@ def aggregate(ids, names, book_key, op, ledgers=None):
         'missing': [uid for uid in ids if uid not in ledgers],
     }
 
+
+def security_snapshot():
+    entries = []
+    path = os.path.join(DATA_DIR, 'network', 'events.jsonl')
+    try:
+        with open(path, 'rb') as fh:
+            fh.seek(max(0, os.fstat(fh.fileno()).st_size - 1024 * 1024))
+            for line in fh.read().splitlines():
+                try: entries.append(json.loads(line))
+                except (ValueError, UnicodeError): pass
+    except OSError: pass
+    for event in read_audit(200):
+        if event.get('result') != 'ok' or event.get('action') in ('export', 'security_block', 'security_unblock'):
+            entries.append({'at': event['ts'], 'ip': event.get('ip', ''), 'kind': '管理操作' if event.get('result') == 'ok' else '管理请求失败', 'detail': {'export':'后台导出账本','login':'后台登录','security_block':'管理员提交封禁','security_unblock':'管理员解除封禁'}.get(event.get('action'), event.get('action', '')) + (' · ' + event['note'] if event.get('note') else '')})
+    status, events = supabase('/rest/v1/rpc/tally_admin_security', method='POST', body={})
+    if status == 200 and isinstance(events, list):
+        for event in events:
+            entries.append({'at': event.get('at'), 'ip': event.get('ip'), 'kind': '入群码尝试失败' if event.get('kind')=='team_code_failed' else event.get('kind','数据库操作'), 'detail': event.get('detail', '')})
+    try:
+        with open(os.path.join(DATA_DIR, 'ip-blocks.json')) as fh: blocked = json.load(fh)
+    except (OSError, ValueError): blocked = []
+    try:
+        with open(os.path.join(DATA_DIR, 'security-status.json')) as fh: agent = json.load(fh)
+        if time.time() - float(agent.get('at', 0)) > 30: agent['status'] = '安全服务超过30秒未更新，请检查服务器'
+    except (OSError, ValueError): agent = {'status': '等待安全服务启动'}
+    def stamp(e):
+        value = e.get('at')
+        try: return float(value)
+        except (ValueError, TypeError):
+            try: return datetime.fromisoformat(str(value).replace('Z', '+00:00')).timestamp()
+            except (ValueError, TypeError): return 0
+    entries.sort(key=stamp, reverse=True)
+    return {'entries': entries[:300], 'blocked': blocked, 'agent': agent}
 
 def cst(ms):
     if not isinstance(ms, (int, float)):
@@ -336,6 +382,9 @@ def fetch_accounts():
             'records': sum(v['records'] for v in stats.values()) if stats else 0,
             **account_activity((row or {}).get('payload')),
         })
+    for team in fetch_teams():
+        stats = ledger_stats(team.get('payload'))
+        accounts.append({'id': team['id'], 'username': '群 · ' + team['name'], 'entity_type': 'team', 'members': team.get('members', 0), 'created_at': team.get('created_at'), 'last_sign_in_at': None, 'banned_until': None, 'confirmed': True, 'revision': team.get('revision'), 'ledger_updated_at': team.get('updated_at'), 'books': stats, 'items': sum(v['items'] for v in stats.values()), 'records': sum(v['records'] for v in stats.values()), **account_activity(team.get('payload'))})
     accounts.sort(key=lambda a: (-account_modified_time(a), a['username'] or '~', a['id']))
     return accounts
 
@@ -462,7 +511,8 @@ class Handler(BaseHTTPRequestHandler):
 
     # -- export ------------------------------------------------------------ #
     def _export(self, user_id, fmt):
-        status, user = supabase('/auth/v1/admin/users/' + user_id)
+        team = next((t for t in fetch_teams() if t['id'] == user_id), None)
+        status, user = (200, {'app_metadata': {'tally_username': '群-' + team['name']}}) if team else supabase('/auth/v1/admin/users/' + user_id)
         if status != 200 or not isinstance(user, dict):
             self._json(404, {'error': 'ACCOUNT_NOT_FOUND'})
             return
@@ -551,7 +601,11 @@ class Handler(BaseHTTPRequestHandler):
 
         match = re.match(r'^/api/accounts/([0-9a-fA-F-]{36})/recommendation$', path)
         if match:
-            status, rows = supabase('/rest/v1/tally_ledgers?select=payload,revision,updated_at&user_id=eq.' + match.group(1) + '&limit=1')
+            try:
+                row = fetch_ledgers([match.group(1)]).get(match.group(1))
+                status, rows = 200, [row] if row else []
+            except Exception:
+                status, rows = 503, None
             if status != 200 or not isinstance(rows, list):
                 self._json(503, {'error': 'BACKEND_UNAVAILABLE'})
                 return
@@ -566,6 +620,10 @@ class Handler(BaseHTTPRequestHandler):
         match = re.match(r'^/api/accounts/([0-9a-fA-F-]{36})/export$', path)
         if match:
             self._export(match.group(1), (query.get('format') or ['csv'])[0])
+            return
+
+        if path == '/api/security':
+            self._json(200, security_snapshot())
             return
 
         if path == '/api/audit':
@@ -603,6 +661,31 @@ class Handler(BaseHTTPRequestHandler):
         if path == '/api/logout':
             audit('logout', ip=client_ip(self))
             self._expire_cookies()
+            return
+
+        if path == '/api/security/block':
+            body = self._body() or {}
+            try:
+                address = ipaddress.ip_address(str(body.get('ip', '')).strip())
+                if address.is_loopback or address.is_link_local or str(address) == client_ip(self):
+                    raise ValueError('不能封禁当前连接或服务器本地地址')
+                ip = str(address)
+                with _lock:
+                    try:
+                        with open(os.path.join(DATA_DIR, 'ip-blocks.json')) as fh: blocked = json.load(fh)
+                    except (OSError, ValueError): blocked = []
+                    blocked = [str(ipaddress.ip_address(v)) for v in blocked]
+                    if body.get('blocked') is True:
+                        if ip not in blocked: blocked.append(ip)
+                    else: blocked = [v for v in blocked if v != ip]
+                    if len(blocked) > 10000: raise ValueError('封禁列表已达上限')
+                    tmp = os.path.join(DATA_DIR, 'ip-blocks.json.tmp')
+                    with open(tmp, 'w') as fh: json.dump(blocked, fh)
+                    os.replace(tmp, os.path.join(DATA_DIR, 'ip-blocks.json'))
+                audit('security_block' if body.get('blocked') is True else 'security_unblock', ip=client_ip(self), note=ip)
+                self._json(200, {'ok': True, 'message': '已提交，安全服务将在几秒内应用'})
+            except (ValueError, TypeError) as exc:
+                self._json(400, {'error': str(exc)})
             return
 
         if path == '/api/aggregate':
@@ -652,6 +735,9 @@ class Handler(BaseHTTPRequestHandler):
             return
 
         user_id, action = match.group(1), match.group(2)
+        if any(t['id'] == user_id for t in fetch_teams()):
+            self._json(400, {'error': '群账本没有登录密码或个人账号封禁设置'})
+            return
         body = self._body() or {}
         accounts = None
         try:

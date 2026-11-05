@@ -1,6 +1,6 @@
-const VERSION='little-tally-shell-v20-current-count-copy';
+const VERSION='little-tally-shell-v22-six-features-final';
 const ROOT=new URL('./',self.location).href;
-const ASSETS=['./','./index.html','./style.css','./app.js','./core.js','./plan-random.js','./account.js','./connection.js','./storage.js','./cloud.js','./cloud-config.js','./vendor/supabase.js','./manifest.webmanifest','./assets/mars-floral.jpg','./assets/mars-identity.jpg','./icon.svg','./icon-192.png','./icon-512.png'];
+const ASSETS=['./','./index.html','./style.css','./app.js','./core.js','./operations.js','./plan-random.js','./account.js','./connection.js','./storage.js','./cloud.js','./cloud-config.js','./vendor/supabase.js','./manifest.webmanifest','./assets/mars-floral.jpg','./assets/mars-identity.jpg','./icon.svg','./icon-192.png','./icon-512.png'];
 self.addEventListener('install',event=>{event.waitUntil((async()=>{const cache=await caches.open(VERSION);await cache.addAll(ASSETS);})());});
 self.addEventListener('activate',event=>{event.waitUntil((async()=>{for(const name of await caches.keys())if(name.startsWith('little-tally-shell-')&&name!==VERSION)await caches.delete(name);await self.clients.claim();})());});
 self.addEventListener('fetch',event=>{

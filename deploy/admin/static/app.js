@@ -201,6 +201,7 @@ function renderRows() {
     exp.addEventListener('click', () => exportAccount(account, 'csv'));
     actions.appendChild(exp);
 
+    if(account.entity_type!=='team'){
     const toggle = el('button', 'ghost small' + (account.banned_until ? '' : ' warn'), account.banned_until ? '启用' : '禁用');
     toggle.type = 'button';
     toggle.addEventListener('click', () => toggleBan(account, toggle));
@@ -210,6 +211,7 @@ function renderRows() {
     reset.type = 'button';
     reset.addEventListener('click', () => resetPassword(account, reset));
     actions.appendChild(reset);
+    }
 
     row.appendChild(actions);
     rows.appendChild(row);
@@ -321,6 +323,7 @@ function openDetail(account) {
 
   const meta = el('dl', 'meta');
   const pairs = [
+    ['类型',account.entity_type==='team'?'群账本 · '+account.members+'名成员':'个人账号'],
     ['状态', account.banned_until ? '已禁用（至 ' + fmtDate(account.banned_until) + '）' : '正常'],
     ['注册时间', fmtDate(account.created_at)],
     ['最近登录', account.last_sign_in_at ? fmtDate(account.last_sign_in_at) : '从未登录'],
@@ -558,6 +561,19 @@ $('sel-all').addEventListener('change', (event) => {
   if (on) for (const a of ACCOUNTS.slice().sort(compareAccounts)) SELECTED.add(a.id);
   renderRows();
 });
+async function loadSecurity(){
+ try{const data=await api('/api/security'),body=$('security-body');body.textContent='';
+ body.appendChild(el('p','muted small','异常请求不等于攻击成功。默认记录，不自动封IP；后台导出记录为管理操作。'));
+ body.appendChild(el('p',null,'安全服务：'+data.agent.status+(data.agent.at?' · '+fmtDate(data.agent.at*1000):'')));
+ for(const ip of data.blocked){const row=el('div','security-row');row.appendChild(el('span',null,'已封禁：'+ip));const btn=el('button','ghost','解除封禁');btn.addEventListener('click',()=>setIpBlock(ip,false));row.appendChild(btn);body.appendChild(row);}
+ for(const event of data.entries){const row=el('div','security-row');const at=typeof event.at==='number'?event.at*1000:event.at;row.appendChild(el('span',null,fmtDate(at)+' · '+event.ip+' · '+event.kind+' · '+event.detail));const btn=el('button','ghost small',data.blocked.includes(event.ip)?'解除封禁':'封禁此IP');btn.addEventListener('click',()=>setIpBlock(event.ip,!data.blocked.includes(event.ip)));row.appendChild(btn);body.appendChild(row);}
+ if(!data.entries.length)body.appendChild(el('p','muted','暂未记录到异常。'));
+ }catch(err){showError('安全记录读取失败：'+err.message);}
+}
+async function setIpBlock(ip,blocked){if(!window.confirm((blocked?'封禁':'解除封禁')+' IP '+ip+'？'))return;try{await api('/api/security/block',{method:'POST',body:JSON.stringify({ip,blocked})});flash('已提交，几秒后刷新可查看生效状态。');await loadSecurity();}catch(err){showError(err.message);}}
+$('security-open').addEventListener('click',async()=>{$('security-panel').hidden=!$('security-panel').hidden;if(!$('security-panel').hidden)await loadSecurity();});
+$('security-refresh').addEventListener('click',loadSecurity);
+$('security-close').addEventListener('click',()=>{$('security-panel').hidden=true;});
 $('logout').addEventListener('click', async () => {
   try { await api('/api/logout', { method: 'POST', body: '{}' }); } catch (e) { /* ignore */ }
   window.location.href = '/admin/';

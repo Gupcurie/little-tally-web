@@ -1,0 +1,14 @@
+[Unit]
+Description=Tally security audit and manual IP enforcement
+After=docker.service
+Requires=docker.service
+[Service]
+Type=simple
+ExecStart=/usr/bin/python3 /opt/little-tally/security/security_agent.py
+Restart=always
+RestartSec=5
+NoNewPrivileges=true
+ProtectHome=true
+PrivateTmp=true
+[Install]
+WantedBy=multi-user.target

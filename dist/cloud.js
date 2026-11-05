@@ -1,11 +1,12 @@
 import {canonicalUsername,checkPassword,accountAddress} from './account.js';
 import {initialState,validateState,clone,uid} from './core.js';
 import {BrowserLedger} from './storage.js';
+import {newSegment} from './operations.js';
 
 export class CloudLedger {
  constructor(config,{createClient,fetcher=globalThis.fetch.bind(globalThis),cacheFactory=scope=>new BrowserLedger({scope})}={}){
   this.config=config;this.createClient=createClient;this.fetcher=fetcher;this.cacheFactory=cacheFactory;
-  this.state=initialState();this.user=null;this.signedIn=false;this.requiresAuth=true;this.configured=Boolean(config.authEnabled!==false&&config.url&&config.publishableKey);
+  this.workspace=null;this.teams=[];this.state=initialState();this.user=null;this.signedIn=false;this.requiresAuth=true;this.configured=Boolean(config.authEnabled!==false&&config.url&&config.publishableKey);
   this.readOnly=true;this.error=null;this.loading=false;this.saving=false;this.savedAt=null;this.cloudRevision=null;this.cache=null;this.cacheWarning=null;this.epoch=0;this.recoverable=null;this.protection=false;this.onchange=()=>{};this.channel=null;this._accountTask=Promise.resolve();
  }
  get db(){return this.signedIn&&this.client;}
@@ -27,7 +28,7 @@ export class CloudLedger {
  async setSession(session){
   const epoch=++this.epoch,oldCache=this.cache;
   // Clear the rendered account before any asynchronous validation or fetch.
-  this.state=initialState();this.user=null;this.signedIn=false;this.readOnly=true;this.cloudRevision=null;this.savedAt=null;this.cache=null;this.error=null;this.loading=Boolean(session);this.onchange();
+  this.workspace=null;this.teams=[];this.state=initialState();this.user=null;this.signedIn=false;this.readOnly=true;this.cloudRevision=null;this.savedAt=null;this.cache=null;this.error=null;this.loading=Boolean(session);this.onchange();
   if(oldCache){try{await oldCache.clear();}catch{this.cacheWarning='上一账户的本机缓存未能完全清除；云端账户隔离仍有效。';}}
   if(!session){this.loading=false;this.onchange();return;}
   try{
@@ -36,6 +37,10 @@ export class CloudLedger {
    this.user={id:data.user.id,username:data.user.app_metadata?.tally_username||'',email:data.user.email};this.signedIn=true;
    this.cache=this.cacheFactory('account-'+data.user.id);await this.cache.init();
    if(epoch!==this.epoch)return;
+   this.teams=await this.listTeams();
+   let preferred;try{preferred=localStorage.getItem('tally-workspace-'+this.user.id);}catch{}
+   const selected=preferred==='personal'?null:this.teams.find(t=>t.id===preferred)||this.teams[0];
+   if(selected){this.workspace=selected;try{await this.cache.clear();}catch{}this.cache=this.cacheFactory('team-'+selected.id+'-'+this.user.id);await this.cache.init();}
    await this.reload();
   }catch(err){if(epoch===this.epoch){this.error=err.message||'登录后读取记录失败，请重试。';this.readOnly=true;}}
   finally{if(epoch===this.epoch){this.loading=false;this.onchange();}}
@@ -47,13 +52,16 @@ export class CloudLedger {
   return {token:s.access_token,user:expected,epoch:this.epoch};
  }
  async request(path,{method='GET',body,context}={}){
-  const who=context||await this.token(),controller=new AbortController(),timer=setTimeout(()=>controller.abort(),15000);
+  const who=context||await this.token();let teamRead=false;
+  if(this.workspace&&path.startsWith('tally_ledgers?')){path='rpc/tally_team_read';method='POST';body={p_team_id:this.workspace.id};teamRead=true;}
+  else if(this.workspace&&path==='rpc/tally_save'){path='rpc/tally_team_save';body={...body,p_team_id:this.workspace.id};}
+  const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),15000);
   try{
    const response=await this.fetcher(this.config.url+'/rest/v1/'+path,{method,headers:{apikey:this.config.publishableKey,Authorization:'Bearer '+who.token,'Content-Type':'application/json'},body:body===undefined?undefined:JSON.stringify(body),signal:controller.signal});
    const data=await response.json().catch(()=>null);
    if(who.epoch!==this.epoch||who.user!==this.user?.id)throw new Error('账户已经切换，这次结果不会显示到另一账户。');
-   if(!response.ok){const message=String(data?.message||'云端请求失败。');throw new Error(message.includes('TALLY_CONFLICT')?'TALLY_CONFLICT':message.includes('TALLY_INVALID')?'云端校验未通过，这次操作没有生效。':response.status===401?'登录已失效，请重新登录。':'云端暂时无法保存，请检查网络后重试。');}
-   return data;
+   if(!response.ok){const message=String(data?.message||'云端请求失败。');throw new Error(message.includes('TALLY_TEAM_')?({TALLY_TEAM_CODE_TAKEN:'这个号码今天已被使用，请更换。',TALLY_TEAM_CODE_INVALID:'入群码不存在或已过期。',TALLY_TEAM_RATE:'入群尝试过多，请稍后再试。',TALLY_TEAM_DENIED:'你没有这个群的权限。'}[message.match(/TALLY_TEAM_[A-Z_]+/)?.[0]]||'组队操作未完成。'):message.includes('TALLY_CONFLICT')?'TALLY_CONFLICT':message.includes('TALLY_INVALID')?'云端校验未通过，这次操作没有生效。':response.status===401?'登录已失效，请重新登录。':'云端暂时无法保存，请检查网络后重试。');}
+   return teamRead?(data?[data]:[]):data;
   }finally{clearTimeout(timer);}
  }
  async reload(){
@@ -63,16 +71,16 @@ export class CloudLedger {
    if(!Array.isArray(rows))throw new Error('云端返回的记录格式不正确。');
    if(rows.length){const row=rows[0];this.cloudRevision=Number(row.revision);this.state=validateState(row.payload);this.savedAt=Date.parse(row.updated_at);await this.saveCache();}
    else{
-    let known=0;try{known=Number(localStorage.getItem('tally-cloud-known-'+who.user)||0);}catch{}
+    let known=0;try{known=Number(localStorage.getItem('tally-cloud-known-'+who.user+(this.workspace?':team-'+this.workspace.id:''))||0);}catch{}
     if(known>0){this.cloudRevision=0;throw new Error('云端没有找到原有记录，已进入保护状态。请从导出的备份恢复，不会自动覆盖为空账本。');}
     this.state=initialState();this.cloudRevision=0;this.savedAt=null;
    }
    this.readOnly=false;this.error=null;
-  }catch(err){this.readOnly=true;this.error=err.message||'云端记录没有加载成功，原记录不会被空数据覆盖。';throw err;}
+  }catch(err){if(who.epoch===this.epoch){this.readOnly=true;this.error=err.message||'云端记录没有加载成功，原记录不会被空数据覆盖。';}throw err;}
   finally{this.onchange();}
  }
  async saveCache(){
-  try{localStorage.setItem('tally-cloud-known-'+this.user.id,String(this.cloudRevision));}catch{}
+  try{localStorage.setItem('tally-cloud-known-'+this.user.id+(this.workspace?':team-'+this.workspace.id:''),String(this.cloudRevision));}catch{}
   try{if(this.cache?.db){await this.cache.restoreState(clone(this.state),{silent:true});this.protection=this.cache.protection;this.cacheWarning=null;}}
   catch{this.cacheWarning='云端已保存，本机备用副本未能写入。';}
  }
@@ -100,8 +108,24 @@ export class CloudLedger {
    this.channel?.postMessage({user:who.user,revision:this.cloudRevision});this.onchange();return this.state;
   }finally{this.saving=false;}
  }
+ async listTeams(){const rows=await this.request('rpc/tally_teams',{method:'POST',body:{}});return Array.isArray(rows)?rows:[];}
+ async selectWorkspace(team){
+  if(this.saving||this.loading)throw Error('请等当前保存或切换完成。');const known=await this.listTeams();if(team&&!known.some(t=>t.id===team.id))throw Error('你不在这个群中。');
+  ++this.epoch;this.loading=true;this.readOnly=true;this.state=initialState();this.workspace=team;this.cloudRevision=null;this.savedAt=null;this.onchange();
+  try{if(this.cache)await this.cache.clear();this.cache=this.cacheFactory(team?'team-'+team.id+'-'+this.user.id:'account-'+this.user.id);await this.cache.init();await this.reload();try{localStorage.setItem('tally-workspace-'+this.user.id,team?.id||'personal');}catch{}}
+  finally{this.loading=false;this.onchange();}
+ }
+ async createTeam(name,code){const empty=newSegment(this.state),payload={format:empty.format,version:1,revision:1,sales:empty.sales,stock:empty.stock,egg:empty.egg,periodStartedAt:empty.periodStartedAt};return this.request('rpc/tally_team_create',{method:'POST',body:{p_name:name,p_code:code,p_snapshot:payload}});}
+ async joinTeam(code){const data=await this.request('rpc/tally_team_join',{method:'POST',body:{p_code:code}});if(data?.error)throw Error(data.error==='TALLY_TEAM_RATE'?'入群尝试过多，请10分钟后再试。':'入群码不存在或已过期。');return data;}
+ async listPeriods(){const rows=await this.request('rpc/tally_periods',{method:'POST',body:{p_team_id:this.workspace?.id||null}});return Array.isArray(rows)?rows:[];}
+ async closePeriod(next){
+  if(this.saving||this.readOnly)throw Error('请等当前账本可保存后再结算。');this.saving=true;
+  try{next.revision=this.cloudRevision+1;validateState(next);const options={method:'POST',body:{p_team_id:this.workspace?.id||null,p_expected_revision:this.cloudRevision,p_snapshot:next,p_mutation:uid()}};
+   try{await this.request('rpc/tally_period_close',options);}catch(first){if(first.message==='TALLY_CONFLICT'){await this.reload();throw Error('账本刚更新，已同步最新数据，请重新核对结算。');}try{await this.request('rpc/tally_period_close',options);}catch{await this.reload();throw Error('已重新读取云端，请先核对当前数量和历史分段，避免重复结算。');}}await this.reload();}
+  finally{this.saving=false;}
+ }
  async restoreState(state){validateState(state);return this.commit(s=>Object.assign(s,clone(state)),{recovering:true});}
- async previous(){const rows=await this.request('rpc/tally_backup_list',{method:'POST',body:{}});if(!rows?.length)return null;const row=rows[0],snapshot=await this.request('rpc/tally_backup_get',{method:'POST',body:{p_revision:row.revision}});return snapshot?{state:validateState(snapshot),savedAt:Date.parse(row.saved_at)}:null;}
+ async previous(){if(this.workspace){const row=await this.request('rpc/tally_team_previous',{method:'POST',body:{p_team_id:this.workspace.id}});return row?{state:validateState(row.payload),savedAt:Date.parse(row.saved_at)}:null;}const rows=await this.request('rpc/tally_backup_list',{method:'POST',body:{}});if(!rows?.length)return null;const row=rows[0],snapshot=await this.request('rpc/tally_backup_get',{method:'POST',body:{p_revision:row.revision}});return snapshot?{state:validateState(snapshot),savedAt:Date.parse(row.saved_at)}:null;}
  async requestProtection(){if(!this.cache)return false;this.protection=await this.cache.requestProtection();return this.protection;}
  raw(){return JSON.stringify(this.state,null,2);}
  async login(username,password){

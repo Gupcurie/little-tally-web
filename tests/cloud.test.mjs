@@ -54,3 +54,30 @@ test('invalid local data never reaches the cloud write API',async()=>{const f=fi
 test('username password login opens the correct account without storing the password',async()=>{const old=globalThis.isSecureContext;globalThis.isSecureContext=true;const f=fixture(),a=f.make();try{await a.init();f.auth.signInWithPassword=async input=>{assert.match(input.email,/^u[a-f0-9]{64}@users\.little-tally\.invalid$/);assert.equal(input.password,'ExampleOnly_95172');f.sessions.B.user.app_metadata={tally_username:'example_01'};f.setSession(f.sessions.B);return {data:{session:f.sessions.B},error:null};};await a.login('Example_01','ExampleOnly_95172');assert.equal(a.user.id,'account-b');assert.equal(a.user.username,'example_01');assert.equal(JSON.stringify(a.state).includes('ExampleOnly_95172'),false);}finally{a.channel?.close();globalThis.isSecureContext=old;}});
 test('wrong username password does not create an account or switch the current ledger',async()=>{const old=globalThis.isSecureContext;globalThis.isSecureContext=true;const f=fixture(),a=f.make();try{await a.init();f.auth.signInWithPassword=async()=>({data:{session:null},error:{status:400}});await assert.rejects(a.login('example_01','WrongExample_999'),/用户名或密码不正确/);assert.equal(a.user.id,'account-a');assert.equal(f.requests.some(x=>x.url.includes('/functions/')),false);}finally{a.channel?.close();globalThis.isSecureContext=old;}});
 test('browser native fetch keeps its Window receiver for registration and ledger requests',async()=>{const oldFetch=globalThis.fetch,oldSecure=globalThis.isSecureContext,f=fixture(),paths=[];let a;globalThis.isSecureContext=true;globalThis.fetch=function(url,options){assert.ok(this===globalThis,'browser native fetch rejects a CloudLedger receiver');paths.push(url);if(url.endsWith('/functions/v1/tally-accounts'))return Promise.resolve(Response.json({created:true}));return f.fetcher(url,options);};try{a=f.make({fetcher:undefined});await a.init();f.auth.signInWithPassword=async()=>({data:{session:f.sessions.A},error:null});await a.register('receiver_test','ExampleOnly_95172');await a.commit(s=>C.change(s.sales,s.sales.items[0].id,1));assert.equal(C.total(a.state.sales),1);assert.ok(paths.some(x=>x.endsWith('/functions/v1/tally-accounts')));assert.ok(paths.some(x=>x.includes('tally_ledgers?')));assert.ok(paths.some(x=>x.endsWith('rpc/tally_save')));}finally{a?.channel?.close();globalThis.fetch=oldFetch;globalThis.isSecureContext=oldSecure;}});
+
+
+test('two authenticated staff share the group while personal ledgers and caches remain independent',async()=>{
+ const fa=fixture(),fb=fixture();fb.setSession(fb.sessions.B);let group=null,row=null;const members=new Set();
+ const shared=original=>async(url,options)=>{
+  const token=options.headers.Authorization,body=JSON.parse(options.body||'{}');
+  if(url.endsWith('rpc/tally_teams'))return Response.json(members.has(token)?[group]:[]);
+  if(url.endsWith('rpc/tally_team_create')){group={id:C.uid(),name:body.p_name};row={payload:body.p_snapshot,revision:1,updated_at:new Date().toISOString()};members.add(token);return Response.json(group);}
+  if(url.endsWith('rpc/tally_team_join')){members.add(token);return Response.json(group);}
+  if(url.endsWith('rpc/tally_team_read'))return members.has(token)?Response.json(row):Response.json({message:'TALLY_TEAM_DENIED'},{status:403});
+  if(url.endsWith('rpc/tally_team_save')){
+   if(!members.has(token))return Response.json({message:'TALLY_TEAM_DENIED'},{status:403});
+   if(body.p_expected_revision!==row.revision)return Response.json({message:'TALLY_CONFLICT'},{status:400});
+   row={payload:body.p_snapshot,revision:row.revision+1,updated_at:new Date().toISOString()};return Response.json({revision:row.revision,updated_at:row.updated_at});
+  }
+  return original(url,options);
+ };
+ const a=fa.make({fetcher:shared(fa.fetcher)}),b=fb.make({fetcher:shared(fb.fetcher)});await a.init();await b.init();
+ await a.commit(s=>{C.setCount(s.sales,s.sales.items[0].id,5);s.privateNote='personal only';});await b.commit(s=>C.setCount(s.sales,s.sales.items[0].id,7));
+ const created=await a.createTeam('共同测试','1234');assert.equal(C.total(row.payload.sales),0);assert.equal(row.payload.privateNote,undefined);
+ await a.selectWorkspace(created);await b.joinTeam('1234');await b.selectWorkspace(created);
+ const id=a.state.sales.items[0].id;await a.commit(s=>C.change(s.sales,id,1));await assert.rejects(b.commit(s=>C.change(s.sales,id,1)),/更新/);assert.equal(C.total(b.state.sales),1);
+ await b.commit(s=>C.change(s.sales,id,1));await a.reload();assert.equal(C.total(a.state.sales),2);
+ await a.selectWorkspace(null);await b.selectWorkspace(null);assert.equal(C.total(a.state.sales),5);assert.equal(C.total(b.state.sales),7);
+ assert.ok(fa.caches.some(c=>c.scope.startsWith('team-')));assert.ok(fb.caches.some(c=>c.scope.startsWith('team-')));
+ a.channel?.close();b.channel?.close();
+});

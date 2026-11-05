@@ -22,7 +22,7 @@ async function loadPage({missingUpdated=false,failApi=false,recommendation=null}
  const timers=[];nodes['auto-refresh'].checked=true;
  const context=vm.createContext({document:{getElementById:id=>nodes[id]||null,createElement:()=>new Element(),cookie:'',visibilityState:'visible',addEventListener:()=>{}},window:{location:{href:''}},Date,Set,setTimeout,setInterval:fn=>{timers.push(fn);return 1;},fetch:async url=>{
   if(failApi&&url.endsWith('/accounts'))return {status:503,ok:false,json:async()=>({error:'BACKEND_UNAVAILABLE'})};
-  return {status:200,ok:true,json:async()=>url.endsWith('/recommendation')?{egg:recommendation}:url.endsWith('/audit')?{entries:[]}:{accounts:[JSON.parse(JSON.stringify(account))],summary:{total:1,active:1,banned:0,with_ledger:1,items:11,records:2,signed_in_7d:1},generated_at:1793491200}};
+  return {status:200,ok:true,json:async()=>url.endsWith('/recommendation')?{egg:recommendation}:url.endsWith('/security')?{entries:[{at:1793880000,ip:'198.51.100.24',kind:'请求被拒绝',detail:'GET /test HTTP 404'}],blocked:[],agent:{status:'运行正常'}}:url.endsWith('/audit')?{entries:[]}:{accounts:[JSON.parse(JSON.stringify(account))],summary:{total:1,active:1,banned:0,with_ledger:1,items:11,records:2,signed_in_7d:1},generated_at:1793491200}};
  }});
  // Run real event wiring, fetch, summary rendering and row rendering from the shipped script.
  const withoutAutoLoad=script.replace(/\nload\(\);\s*$/,'');
@@ -165,3 +165,6 @@ test('aggregate tables align account columns and offer result-only or full-proce
   await actions.children[1].listeners.click();assert.match(copied,/账号甲/);assert.match(copied,op==='sum'?/鼠标垫\t3\t5\t8/:/鼠标垫\t3\t5\t-2/);assert.match(copied,op==='sum'?/总计\t3\t5\t8/:/总计\t3\t5\t-2/);
  }
 });
+
+
+test('security opens its own admin panel with full IP, time, behavior and a manual block action',async()=>{const nodes=await loadPage();nodes['security-panel'].hidden=true;await nodes['security-open'].listeners.click();assert.equal(nodes['security-panel'].hidden,false);assert.match(nodes['security-body'].textContent,/198\.51\.100\.24/);assert.match(nodes['security-body'].textContent,/请求被拒绝/);assert.match(nodes['security-body'].textContent,/封禁此IP/);});

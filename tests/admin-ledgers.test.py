@@ -80,10 +80,10 @@ class AdminBooksTest(unittest.TestCase):
         egg = payload()['egg']
         egg['recommendation'] = {'test': 'stored snapshot'}
         before = copy.deepcopy(egg)
-        with patch.object(admin, 'supabase', return_value=(200, [{'payload': {'egg': egg, 'sales': {}}, 'revision': 7, 'updated_at': 'now'}])) as request:
+        with patch.object(admin, 'supabase', return_value=(200, [{'user_id': A, 'payload': {'egg': egg, 'sales': {}}, 'revision': 7, 'updated_at': 'now'}])) as request:
             admin.Handler.do_GET(handler)
             self.assertEqual(handler.response[1], {'egg': egg, 'revision': 7, 'updated_at': 'now'})
-            self.assertIn('user_id=eq.' + A, request.call_args.args[0])
+            self.assertIn('user_id=in.(' + A, request.call_args.args[0])
         self.assertEqual(egg, before)
 
     def test_recommendation_endpoint_reports_backend_failure_and_missing_ledger(self):
@@ -155,7 +155,8 @@ class AdminBooksTest(unittest.TestCase):
             self.assertEqual(admin.aggregate([A, B], {}, 'egg', 'sum')['rows'][0]['values'], [2, 0])
 
     def test_account_overview_includes_egg_items_and_records(self):
-        def fake_supabase(url):
+        def fake_supabase(url, **kwargs):
+            if url.endswith('tally_admin_teams'): return 200, []
             if url.startswith('/auth/'):
                 return 200, {'users': [{'id': A, 'app_metadata': {'tally_username': 'test'}}]}
             return 200, [{'user_id': A, 'payload': payload(), 'revision': 1}]
@@ -193,6 +194,20 @@ class AdminBooksTest(unittest.TestCase):
             admin.Handler.do_POST(handler)
             self.assertEqual(handler.response[0],503)
             self.assertNotIn('books',handler.response[1])
+
+    def test_group_ledgers_are_visible_and_can_be_aggregated_by_the_admin(self):
+        group = '00000000-0000-4000-8000-000000000009'
+        with patch.object(admin, 'supabase', return_value=(200, [])), patch.object(admin, 'fetch_teams', return_value=[{'id':group,'payload':payload()}]):
+            result = admin.aggregate([group,A],{},'egg','sum')
+            self.assertEqual(result['rows'][0]['values'],[5,0])
+            self.assertEqual(result['missing'],[A])
+
+    def test_security_endpoints_require_session_and_reject_invalid_or_current_ip(self):
+        handler = Handler(authenticated=False);handler.path='/admin/api/security'
+        admin.Handler.do_GET(handler);self.assertEqual(handler.response[0],401)
+        for ip in ['not-an-ip','1.2.3.4; rm -rf /','127.0.0.1','198.51.100.1']:
+            handler=Handler();handler.path='/admin/api/security/block';handler.body={'ip':ip,'blocked':True};handler.headers={'X-Forwarded-For':'198.51.100.1'}
+            admin.Handler.do_POST(handler);self.assertEqual(handler.response[0],400)
 
     def test_invalid_book_and_unauthenticated_requests_are_rejected(self):
         for key in ('invalid', {}, None):
