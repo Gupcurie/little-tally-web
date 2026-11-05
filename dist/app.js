@@ -88,7 +88,7 @@ function countView(){
  const b=book(),c=C.counts(b),total=C.sum(Object.values(c)),today=C.sum(C.todayRecords(b).map(r=>r.delta));
  const lastSaleId=state.book==='sales'?b.records.reduce((last,r)=>!last||r.at>=last.at?r:last,null)?.itemId:null;
  const date=new Intl.DateTimeFormat('zh-CN',{timeZone:C.ZONE,month:'long',day:'numeric',weekday:'long'}).format(Date.now());
- return `<section class="count-dashboard"><div class="count-topbar"><div class="book-switch" aria-label="选择账本">${['sales','stock'].map(k=>`<button class="${state.book===k?'active':''}" data-action="book" data-book="${k}">${icon(k==='sales'?'count':'stock')}${title(k)}</button>`).join('')}</div><button class="small-button count-copy" data-action="copy-today-sales">${icon('copy')}复制今日销售</button></div>
+ return `<section class="count-dashboard"><div class="count-topbar"><div class="book-switch" aria-label="选择账本">${['sales','stock'].map(k=>`<button class="${state.book===k?'active':''}" data-action="book" data-book="${k}">${icon(k==='sales'?'count':'stock')}${title(k)}</button>`).join('')}</div><button class="small-button count-copy" data-action="copy-count-report">${icon('copy')}${state.book==='sales'?'复制今日销售':'复制库存'}</button></div>
  ${localMode?'<div class="mode-banner">本机体验模式 · 记录仅在当前设备 <button data-action="cloud-mode">登录云端版 →</button></div>':''}<section class="hero" aria-label="账本合计"><div class="hero-top"><div><h1>${state.book==='sales'?'销售总数':'库存总数'}</h1><span class="date">${date} · 北京时间</span></div><span class="badge">${localMode?'本机体验':'云端账户'}</span></div><svg class="hero-art" viewBox="0 0 108 108" fill="none" aria-hidden="true"><path d="M37 28v52m17-52v52m17-52v52M23 71l63-29" stroke="#d92f4b" stroke-width="5" stroke-linecap="round"/></svg><div class="hero-total ${String(total).length>7?'long':''}" data-testid="total">${fmt(total)}<small>件</small></div><div class="hero-bottom"><span>${b.items.length} 类物品 · 累计数量</span><span class="today">今日 ${today>=0?'+':''}${fmt(today)}</span></div></section>
  ${goalBanner(b)}<div class="heading-row count-heading"><h2>我的物品 <span class="muted" style="font-size:11px;font-weight:400;margin-left:5px">${String(b.items.length).padStart(2,'0')}</span></h2><div class="count-tools"><button class="small-button" data-action="add-item">${icon('plus')}添加</button><button class="small-button" data-action="manage">${icon('settings')}管理</button></div></div>
  ${b.items.length?`<div class="item-grid">${b.items.map(i=>`<article class="item-card${i.id===lastSaleId?' sales-flash':''}"><button class="item-name" data-action="detail" data-id="${e(i.id)}"><span class="dot" style="background:${color(i)}"></span><span class="name">${e(i.name)}</span>${icon('arrow')}</button><button class="item-number ${String(c[i.id]).length>6?'long':''}" data-action="edit-count" data-id="${e(i.id)}" aria-label="修改${e(i.name)}数量">${fmt(c[i.id])}</button>${state.book==='stock'&&Object.keys(i.breakdown).length?`<div class="item-parts">${Object.entries(i.breakdown).map(([k,v])=>`${e(k)} ${fmt(v)}`).join(' · ')}</div>`:''}<div class="stepper"><button class="minus" data-action="decrease" data-id="${e(i.id)}" aria-label="${e(i.name)}减一" ${c[i.id]===0?'disabled':''}>${icon('minus')}</button><button class="plus" data-action="increase" data-id="${e(i.id)}" aria-label="${e(i.name)}加一">${icon('plus')}</button></div></article>`).join('')}</div>`:empty('还没有物品','添加第一件物品，开始记录吧。')}
@@ -458,16 +458,19 @@ async function copyEggReport(){
  }
 }
 function todaySalesReport(sales=ledger.state.sales,now=Date.now()){
- const stats=new Map(sales.items.map(i=>[i.id,{sold:0,returned:0,manual:0,net:0}])),current=C.counts(sales);
- for(const r of C.todayRecords(sales,now)){const item=stats.get(r.itemId);if(!item)continue;item.net+=r.delta;if(r.kind==='set')item.manual+=r.delta;else if(r.delta>0)item.sold+=r.delta;else item.returned-=r.delta;}
- const totals={sold:0,returned:0,manual:0,net:0};for(const item of stats.values())for(const key of Object.keys(totals))totals[key]+=item[key];
- const signed=n=>(n>0?'+':'')+fmt(n);
- return `拆弹专家｜今日销售\n日期：${C.day(now)}（北京时间）\n统计时间：${C.clock(now,true)}\n今日售出 ${fmt(totals.sold)} 件｜退回 ${fmt(totals.returned)} 件｜手动改数 ${signed(totals.manual)} 件｜净增 ${signed(totals.net)} 件\n\n${sales.items.map(i=>{const item=stats.get(i.id);return `${i.name}：售出 ${fmt(item.sold)}｜退回 ${fmt(item.returned)}｜手动改数 ${signed(item.manual)}｜净增 ${signed(item.net)}｜累计 ${fmt(current[i.id])}`;}).join('\n')||'暂无销售品类'}`;
+ const quantities=new Map(sales.items.map(i=>[i.id,0]));
+ for(const record of C.todayRecords(sales,now))if(quantities.has(record.itemId))quantities.set(record.itemId,quantities.get(record.itemId)+record.delta);
+ const total=C.sum([...quantities.values()]);
+ return `拆弹专家｜今日销售情况\n日期：${C.day(now)}（北京时间）\n合计：${fmt(total)} 件\n\n${sales.items.map(i=>`${i.name}：${fmt(quantities.get(i.id))} 件`).join('\n')||'暂无销售品类'}`;
 }
-async function copyTodaySales(){
- const text=todaySalesReport();
- try{await navigator.clipboard.writeText(text);toast('今日销售情况已复制。');}
- catch{showSheet('复制今日销售',`<textarea class="field-input sales-copy-text" readonly aria-label="今日销售情况">${e(text)}</textarea><p class="hint">自动复制未成功，可长按内容全选并复制。</p><button class="primary-button" type="button" data-action="close-sheet">完成</button>`);requestAnimationFrame(()=>{const field=sheetContent.querySelector('.sales-copy-text');field?.focus();field?.select();});}
+function currentStockReport(stock=ledger.state.stock,now=Date.now()){
+ const quantities=C.counts(stock),total=C.sum(stock.items.map(i=>quantities[i.id]));
+ return `拆弹专家｜当前库存情况\n统计时间：${C.clock(now,true)}（北京时间）\n合计：${fmt(total)} 件\n\n${stock.items.map(i=>`${i.name}：${fmt(quantities[i.id])} 件`).join('\n')||'暂无库存品类'}`;
+}
+async function copyCountReport(){
+ const sales=state.book==='sales',label=sales?'今日销售情况':'当前库存情况',text=sales?todaySalesReport():currentStockReport();
+ try{await navigator.clipboard.writeText(text);toast(label+'已复制。');}
+ catch{showSheet('复制'+label,`<textarea class="field-input count-copy-text" rows="12" readonly aria-label="${label}">${e(text)}</textarea><p class="hint">自动复制未成功，可长按内容全选并复制。</p><button class="primary-button" type="button" data-action="close-sheet">完成</button>`);requestAnimationFrame(()=>{const field=sheetContent.querySelector('.count-copy-text');field?.focus();field?.select();});}
 }
 function installHelp(){const isIOS=/iPad|iPhone|iPod/.test(navigator.userAgent);showSheet('把拆弹专家放进口袋',`<p>添加到主屏幕后，就能像 App 一样从图标打开。</p><ol class="install-steps"><li>${isIOS?'请用 Safari 打开这个网页。':'在手机浏览器中打开这个网页。'}</li><li>${isIOS?'点击浏览器的“分享”按钮。':'打开浏览器菜单，选择“安装应用”或“添加到主屏幕”。'}</li><li>${isIOS?'选择“添加到主屏幕”，如有“作为网页 App 打开”请开启。':'确认名称为“拆弹专家”，完成添加。'}</li></ol><div class="soft-message">建议先添加再正式记数，并固定使用同一个入口。如果已有记录，请先在设置里导出备份，再在主屏幕版导入。</div><button class="primary-button" type="button" data-action="close-sheet">知道了</button>`);}
 async function action(a,node){
@@ -484,7 +487,7 @@ async function action(a,node){
  if(a==='install'){installHelp();return;}
  if(a==='detail'){state.itemID=id;render();window.scrollTo({top:0});return;}
  if(a==='detail-back'){state.itemID=null;render();return;}
- if(a==='copy-today-sales'){await copyTodaySales();return;}
+ if(a==='copy-count-report'){await copyCountReport();return;}
  if(a==='egg-copy'){await copyEggReport();return;}
  if(a==='egg-tools'){showSheet('放蛋操作',`<button class="list-button" type="button" data-action="egg-manage">${icon('edit')}<span>管理物品（改名 / 删除）</span>${icon('arrow','chevron')}</button><button class="list-button" type="button" data-action="egg-add-item">${icon('plus')}<span>添加物品</span>${icon('arrow','chevron')}</button><button class="list-button" type="button" data-action="page" data-page="ratio" data-book="egg">${icon('ratio')}<span>设置比例</span>${icon('arrow','chevron')}</button><button class="list-button" type="button" data-action="egg-arrange">${icon('count')}<span>排列卡片</span>${icon('arrow','chevron')}</button><button class="list-button" type="button" data-action="egg-only">${icon('target')}<span>${state.eggOnlyLeft?'显示全部物品':'只看本轮还缺的'}</span>${icon('arrow','chevron')}</button>`);return;}
  if(a==='egg-add'){const id=node.dataset.id;await mutateEgg(egg=>C.eggChange(egg,id,1),{placedId:id});return;}

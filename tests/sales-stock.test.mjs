@@ -138,7 +138,7 @@ test('the actual page mutation saves both books in one commit',async()=>{
  vm.runInContext(source.slice(source.indexOf('async function mutateState('),source.indexOf('function loadRatio(')),context);
  await context.mutate(b=>C.change(b,sale,1));assert.equal(commits,1);assert.deepEqual(quantities(saved),[1,9]);
 });
-test('today-sales copy separates sales, returns and manual corrections using Beijing dates',()=>{
+test('today-sales copy reports only final quantities using Beijing dates',()=>{
  const {state,sale}=fixture();const now=Date.parse('2026-11-01T00:10:00+08:00');
  state.sales.records=[
   {id:C.uid(),itemId:sale,delta:2,kind:'count',at:Date.parse('2026-10-31T23:59:59+08:00')},
@@ -146,30 +146,30 @@ test('today-sales copy separates sales, returns and manual corrections using Bei
   {id:C.uid(),itemId:sale,delta:-1,kind:'count',at:now-1000},
   {id:C.uid(),itemId:sale,delta:4,kind:'set',at:now}];
  const ctx=vm.createContext({C,ledger:{state},fmt:String});
- vm.runInContext(source.slice(source.indexOf('function todaySalesReport('),source.indexOf('async function copyTodaySales(')),ctx);
+ vm.runInContext(source.slice(source.indexOf('function todaySalesReport('),source.indexOf('async function copyCountReport(')),ctx);
  const text=ctx.todaySalesReport(state.sales,now);
- assert.match(text,/日期：2026-11-01/);assert.match(text,/今日售出 3 件｜退回 1 件｜手动改数 \+4 件｜净增 \+6 件/);
- assert.match(text,/甲：售出 3｜退回 1｜手动改数 \+4｜净增 \+6｜累计 8/);
+ assert.match(text,/日期：2026-11-01/);assert.match(text,/合计：6 件/);assert.doesNotMatch(text,/退回|手动改数|净增|累计/);
+ assert.match(text,/甲：6 件/);
 });
-test('both count screens offer today-sales copy and only sales highlights the latest recorded item',()=>{
+test('count screens label their own copy report and only sales highlights the latest recorded item',()=>{
  const {state,sale}=fixture();C.addItem(state.sales,'乙');C.setCount(state.sales,sale,1);
  C.setCount(state.sales,state.sales.items[1].id,1);state.sales.records.at(-1).at-=86400000;
  const ctx=vm.createContext({C,state:{book:'sales'},book:()=>state.sales,fmt:String,e:String,localMode:false,icon:()=>'',title:String,
   color:()=>'',goalBanner:()=>'',empty:()=>'',timeBadge:()=>''});
  vm.runInContext(source.slice(source.indexOf('function countView('),source.indexOf('function goalBanner(')),ctx);
- const salesMarkup=ctx.countView();assert.match(salesMarkup,/data-action="copy-today-sales"/);assert.equal((salesMarkup.match(/sales-flash/g)||[]).length,1);
+ const salesMarkup=ctx.countView();assert.match(salesMarkup,/data-action="copy-count-report"/);assert.equal((salesMarkup.match(/sales-flash/g)||[]).length,1);
  assert.match(salesMarkup,new RegExp('class="item-card sales-flash"><button[^>]+data-id="'+sale+'"'));
  ctx.state.book='stock';ctx.book=()=>state.stock;
- const stockMarkup=ctx.countView();assert.match(stockMarkup,/data-action="copy-today-sales"/);assert.doesNotMatch(stockMarkup,/sales-flash|recommended/);
+ const stockMarkup=ctx.countView();assert.match(stockMarkup,/data-action="copy-count-report"/);assert.match(stockMarkup,/复制库存/);assert.doesNotMatch(stockMarkup,/复制今日销售/);assert.doesNotMatch(stockMarkup,/sales-flash|recommended/);
 });
-test('today-sales copy always uses sales data even when inventory is open and handles clipboard denial',async()=>{
+test('count copy follows the active book and handles clipboard denial',async()=>{
  const {state,sale,item}=fixture();C.change(state.sales,sale,1);C.setCount(state.stock,item,88);
  let text='',fallback='',selected=false;
  const ctx=vm.createContext({C,ledger:{state},state:{book:'stock'},fmt:String,e:String,toast:()=>{},
   navigator:{clipboard:{writeText:async value=>{text=value;}}},showSheet:(title,body)=>{fallback=body;},requestAnimationFrame:fn=>fn(),
   sheetContent:{querySelector:()=>({focus(){},select(){selected=true;}})}});
  vm.runInContext(source.slice(source.indexOf('function todaySalesReport('),source.indexOf('function installHelp(')),ctx);
- await ctx.copyTodaySales();assert.match(text,/今日售出 1 件/);assert.doesNotMatch(text,/88/);
- ctx.navigator.clipboard.writeText=async()=>{throw Error('Denied');};await ctx.copyTodaySales();
+ await ctx.copyCountReport();assert.match(text,/当前库存情况/);assert.match(text,/88 件/);ctx.state.book='sales';await ctx.copyCountReport();assert.match(text,/今日销售情况/);assert.match(text,/合计：1 件/);assert.doesNotMatch(text,/88|退回/);
+ ctx.navigator.clipboard.writeText=async()=>{throw Error('Denied');};await ctx.copyCountReport();
  assert.match(fallback,/今日销售情况/);assert.match(fallback,/readonly/);assert.equal(selected,true);
 });
