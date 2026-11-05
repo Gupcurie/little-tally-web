@@ -180,7 +180,7 @@ def fetch_ledgers(ids):
     status, rows = supabase('/rest/v1/tally_ledgers?select=user_id,revision,updated_at,payload'
                             '&user_id=in.(%s)' % expr)
     if status != 200 or not isinstance(rows, list):
-        return {}
+        raise RuntimeError('ledger read failed')
     return {row.get('user_id'): row for row in rows}
 
 
@@ -196,9 +196,10 @@ def name_key(name):
     return ' '.join(str(name or '').split()).lower() or '(未命名)'
 
 
-def aggregate(ids, names, book_key, op):
+def aggregate(ids, names, book_key, op, ledgers=None):
     """Read-only aggregation across accounts, matched by item name."""
-    ledgers = fetch_ledgers(ids)
+    if ledgers is None:
+        ledgers = fetch_ledgers(ids)
     rows = {}
     for uid in ids:
         row = ledgers.get(uid)
@@ -466,7 +467,11 @@ class Handler(BaseHTTPRequestHandler):
             self._json(404, {'error': 'ACCOUNT_NOT_FOUND'})
             return
         username = ((user.get('app_metadata') or {}).get('tally_username')) or user_id[:8]
-        payload = (fetch_ledgers([user_id]).get(user_id) or {}).get('payload') or {}
+        try:
+            payload = (fetch_ledgers([user_id]).get(user_id) or {}).get('payload') or {}
+        except Exception:
+            self._json(503, {'error': 'BACKEND_UNAVAILABLE'})
+            return
         stamp = time.strftime('%Y%m%d-%H%M')
         safe = re.sub(r'[^A-Za-z0-9_-]', '_', username) or 'account'
         if fmt == 'json':
@@ -628,7 +633,15 @@ class Handler(BaseHTTPRequestHandler):
             if any(uid not in names for uid in ids):
                 self._json(404, {'error': 'ACCOUNT_NOT_FOUND'})
                 return
-            result = aggregate(ids, names, book, op)
+            try:
+                if body.get('all_books') is True:
+                    ledgers = fetch_ledgers(ids)
+                    result = {'op': op, 'books': {key: aggregate(ids, names, key, op, ledgers) for key in BOOK_LABELS}}
+                else:
+                    result = aggregate(ids, names, book, op)
+            except Exception:
+                self._json(503, {'error': '账本读取失败，请刷新后重试'})
+                return
             audit('aggregate', ','.join(ids)[:64], '%s %s' % (book, op), client_ip(self))
             self._json(200, result)
             return

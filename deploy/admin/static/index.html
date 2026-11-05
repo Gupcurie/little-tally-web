@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="robots" content="noindex, nofollow">
 <title>拆弹专家 · 账号管理</title>
-<link rel="stylesheet" href="/admin/static/style.css?v=20261101-mobile-cards">
+<link rel="stylesheet" href="/admin/static/style.css?v=20261105-aggregate-fix">
 </head>
 <body>
 <div class="wrap">
@@ -35,7 +35,7 @@
     <div class="toolbar">
       <input id="search" type="search" placeholder="搜索用户名" autocomplete="off" spellcheck="false">
       <label class="check"><input type="checkbox" id="sel-all"> 全选</label>
-      <select id="book" aria-label="单独计算的账本">
+      <select id="book" aria-label="优先显示的账本">
         <option value="stock">库存账本</option>
         <option value="sales">销售账本</option>
         <option value="egg">放蛋账本</option>
@@ -44,7 +44,7 @@
       <button id="btn-diff" class="ghost" type="button" disabled>相减（首个减其余）</button>
       <button id="reload" class="ghost" type="button">刷新</button>
     </div>
-    <p class="muted small">先勾选账号，再选择放蛋、销售或库存账本，分别计算。同名物品合并，按累计数量计算。</p>
+    <p class="muted small">相加相减同时显示放蛋、销售和库存，分别计算并复制。下拉框选择优先显示的账本；同名物品按累计数量合并。</p>
     <p id="sel-info" class="muted small">未选择账号 · 勾选后可汇总或相减，按勾选顺序，首个账号减其余账号</p>
 
     <p class="muted small account-order-hint">置顶账号优先，同组按最后保存时间从新到旧排列。置顶保存在当前浏览器。</p>
@@ -102,6 +102,6 @@
   </div>
 </div>
 
-<script src="/admin/static/app.js" defer></script>
+<script src="/admin/static/app.js?v=20261105-aggregate-fix" defer></script>
 </body>
 </html>

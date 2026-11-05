@@ -427,12 +427,41 @@ async function runAggregate(op) {
   try {
     const data = await api('/api/aggregate', {
       method: 'POST',
-      body: JSON.stringify({ ids: ids, book: $('book').value, op: op }),
+      body: JSON.stringify({ ids: ids, book: $('book').value, op: op, all_books: true }),
     });
-    renderAggregate(data);
+    if(data.books)renderAllAggregates(data);else renderAggregate(data);
   } catch (err) {
     showError('汇总失败：' + err.message);
   }
+}
+
+function renderAllAggregates(data){
+ const body=$('a-body');body.textContent='';$('a-title').textContent='多账号'+(data.op==='diff'?'相减':'相加')+'结果';
+ const first=$('book').value;
+ for(const key of [first,...['egg','sales','stock'].filter(k=>k!==first)]){
+  const result=data.books[key];if(!result)continue;
+  const section=el('section','aggregate-book');section.appendChild(el('h3',null,BOOK_LABELS[key]));
+  const formula=el('p','muted small','计算：'+result.users.map(u=>u.username||u.id.slice(0,6)).join(result.op==='diff'?' − ':' + '));section.appendChild(formula);
+  const total=result.rows.reduce((n,r)=>n+(result.op==='diff'?r.diff:r.sum),0);
+  section.appendChild(el('p','aggregate-total',(result.op==='diff'?'差值总计：':'合计：')+total));
+  const copy=el('button','primary-refresh','一键复制'+BOOK_LABELS[key]+'结果');copy.type='button';
+  copy.addEventListener('click',()=>copyAggregateResult(result,section));section.appendChild(copy);
+  if(result.missing?.length)section.appendChild(el('p','muted small','其中'+result.missing.length+'个账号尚未保存账本，按0计算。'));
+  const accounts=el('details','aggregate-accounts');accounts.appendChild(el('summary',null,'查看各账号累计数量（'+result.users.length+'个账号）'));
+  result.users.forEach((u,k)=>accounts.appendChild(el('p',null,(u.username||u.id.slice(0,6))+'：'+result.rows.reduce((n,row)=>n+row.values[k],0))));section.appendChild(accounts);
+  if(!result.rows.length)section.appendChild(el('p','muted','当前所选账号在此账本没有物品。'));
+  for(const row of result.rows){
+   const item=el('details','aggregate-item'),head=el('summary');head.appendChild(el('span',null,row.name));head.appendChild(el('strong',null,String(result.op==='diff'?row.diff:row.sum)));item.appendChild(head);
+   result.users.forEach((u,k)=>{const line=el('div','aggregate-value');line.appendChild(el('span',null,u.username||u.id.slice(0,6)));line.appendChild(el('strong',null,String(row.values[k])));item.appendChild(line);});section.appendChild(item);
+  }
+  body.appendChild(section);
+ }
+ $('agg').hidden=false;
+}
+async function copyAggregateResult(data,target){
+ const text=aggregateText(data),ok=await copyText(text);
+ if(!ok){const field=el('textarea');field.value=text;field.readOnly=true;field.setAttribute('aria-label','可手动复制的计算结果');field.style.width='100%';field.rows=10;target.appendChild(field);field.focus();field.select();}
+ flash(ok?'已复制计算结果':'请长按下方文本全选复制');
 }
 
 function aggregateText(data){

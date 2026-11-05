@@ -143,3 +143,12 @@ test('all three books copy separate multi-account results including negative tot
   assert.match(copied,new RegExp({egg:'放蛋',sales:'销售',stock:'库存'}[book]+'账本'));
  }
 });
+
+
+test('combined results show all three books with visible item totals and separate account quantities and copying',async()=>{
+ const nodes=await loadPage();nodes.book.value='stock';let copied='';nodes.context.capture=text=>{copied=text;return true;};vm.runInContext('copyText=async text=>capture(text)',nodes.context);
+ const books={};for(const [k,n] of [['egg',8],['sales',12],['stock',16]])books[k]={book:k,op:'sum',users:[{username:'甲'},{username:'乙'}],rows:[{name:'物品',values:[n,2],sum:n+2}]};
+ nodes.context.data={op:'sum',books};vm.runInContext('renderAllAggregates(data)',nodes.context);
+ const sections=nodes['a-body'].children;assert.equal(sections.length,3);assert.match(sections[0].textContent,/库存账本/);
+ for(const section of sections){assert.match(section.textContent,/甲/);assert.match(section.textContent,/乙/);assert.match(section.textContent,/合计/);const copy=section.children.find(e=>e.textContent.startsWith('一键复制'));await copy.listeners.click();assert.match(copied,/物品/);assert.match(copied,/总计/);}
+});

@@ -174,6 +174,26 @@ class AdminBooksTest(unittest.TestCase):
         aggregate.assert_called_once_with([A, B], {A: 'a', B: 'b'}, 'egg', 'sum')
         self.assertEqual(handler.response, (200, {'book': 'egg', 'rows': []}))
 
+    def test_combined_route_reads_one_ledger_snapshot_for_three_separate_books(self):
+        handler = Handler();handler.body['all_books'] = True
+        accounts = [{'id': A, 'username': 'a'}, {'id': B, 'username': 'b'}]
+        with patch.object(admin, 'fetch_accounts', return_value=accounts), patch.object(admin, 'fetch_ledgers', return_value={A: {'payload': payload()}}) as fetch, patch.object(admin, 'audit'):
+            admin.Handler.do_POST(handler)
+            self.assertEqual(handler.response[0], 200)
+            self.assertEqual(set(handler.response[1]['books']), {'sales','stock','egg'})
+            fetch.assert_called_once_with([A,B])
+            for key,n in [('sales',5),('stock',8),('egg',5)]:
+                self.assertEqual(handler.response[1]['books'][key]['rows'][0]['values'], [n,0])
+
+    def test_failed_batch_read_is_not_silently_reported_as_zero_accounts(self):
+        with patch.object(admin, 'supabase', return_value=(503, {})):
+            with self.assertRaises(RuntimeError): admin.fetch_ledgers([A,B])
+        handler = Handler();handler.body['all_books'] = True
+        with patch.object(admin, 'fetch_accounts', return_value=[{'id':A,'username':'a'},{'id':B,'username':'b'}]), patch.object(admin, 'fetch_ledgers', side_effect=RuntimeError('failed')):
+            admin.Handler.do_POST(handler)
+            self.assertEqual(handler.response[0],503)
+            self.assertNotIn('books',handler.response[1])
+
     def test_invalid_book_and_unauthenticated_requests_are_rejected(self):
         for key in ('invalid', {}, None):
             handler = Handler(key)

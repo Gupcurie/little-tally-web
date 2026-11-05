@@ -439,3 +439,5 @@ body.center {
 .pin-action.is-pinned{border-color:#e7a3b4;background:#fff0f4;color:#b92543}
 .account-pinned .namebox strong{color:#b92543}
 .account-order-hint{margin:0 0 12px}
+
+.aggregate-book{padding:12px 0 20px;border-bottom:1px solid var(--line);overflow-wrap:anywhere}.aggregate-book h3{margin:0 0 8px;color:var(--accent)}.aggregate-total{font-weight:700}.aggregate-accounts{margin:14px 0;font-size:13px}.aggregate-accounts p{margin:8px 0}.aggregate-item{border-top:1px solid var(--line);padding:12px 0}.aggregate-item summary{display:flex;align-items:center;justify-content:space-between;gap:14px;cursor:pointer}.aggregate-item summary span{min-width:0;flex:1}.aggregate-item summary span::before{content:'▸ ';color:var(--muted)}.aggregate-item[open] summary span::before{content:'▾ '}.aggregate-item summary strong{flex:none;font-variant-numeric:tabular-nums;color:var(--accent)}.aggregate-value{display:flex;justify-content:space-between;gap:14px;padding:8px;font-size:13px;background:var(--accent-soft)}.aggregate-value span{min-width:0}.aggregate-value strong{flex:none}
