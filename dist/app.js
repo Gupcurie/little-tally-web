@@ -359,6 +359,10 @@ function eggView(){
   <div class="egg-grid" data-columns="${state.eggCols}">${shown.length?shown.map(id=>eggCard(byId[id],egg)).join(''):`<p class="egg-none">没有未放满的物品。<button class="small-button" data-action="egg-only">显示全部</button></p>`}</div>
  </section>`;
 }
+function showEggItemManager(){
+ const egg=eggBook(),counts=C.eggCounts(egg);
+ showSheet('管理放蛋物品',`<p class="hint">改名会保留数量和记录。删除会同时移除该物品的数量与记录。</p><div class="egg-manager">${egg.items.map(i=>`<div class="egg-manager-row"><div><strong>${e(i.name)}</strong><small>累计 ${fmt(counts[i.id])} 个 · 比例 ${i.ratio}</small></div><button type="button" class="small-button" data-action="egg-rename" data-id="${e(i.id)}" data-manager="1">改名</button><button type="button" class="small-button remove" data-action="egg-delete-item" data-id="${e(i.id)}">删除</button></div>`).join('')||'<p>还没有放蛋物品。</p>'}</div><button type="button" class="list-button" data-action="egg-add-item">${icon('plus')}添加物品</button>`);
+}
 function eggDetailView(){
  const egg=eggBook(),item=egg.items.find(i=>i.id===state.eggItemID),p=C.eggProgress(egg).find(x=>x.id===state.eggItemID);
  if(!item||!p){state.eggItemID=null;return eggView();}
@@ -482,10 +486,12 @@ async function action(a,node){
  if(a==='detail-back'){state.itemID=null;render();return;}
  if(a==='copy-today-sales'){await copyTodaySales();return;}
  if(a==='egg-copy'){await copyEggReport();return;}
- if(a==='egg-tools'){showSheet('放蛋操作',`<button class="list-button" type="button" data-action="egg-add-item">${icon('plus')}<span>添加物品</span>${icon('arrow','chevron')}</button><button class="list-button" type="button" data-action="page" data-page="ratio" data-book="egg">${icon('ratio')}<span>设置比例</span>${icon('arrow','chevron')}</button><button class="list-button" type="button" data-action="egg-arrange">${icon('count')}<span>排列卡片</span>${icon('arrow','chevron')}</button><button class="list-button" type="button" data-action="egg-only">${icon('target')}<span>${state.eggOnlyLeft?'显示全部物品':'只看本轮还缺的'}</span>${icon('arrow','chevron')}</button>`);return;}
+ if(a==='egg-tools'){showSheet('放蛋操作',`<button class="list-button" type="button" data-action="egg-manage">${icon('edit')}<span>管理物品（改名 / 删除）</span>${icon('arrow','chevron')}</button><button class="list-button" type="button" data-action="egg-add-item">${icon('plus')}<span>添加物品</span>${icon('arrow','chevron')}</button><button class="list-button" type="button" data-action="page" data-page="ratio" data-book="egg">${icon('ratio')}<span>设置比例</span>${icon('arrow','chevron')}</button><button class="list-button" type="button" data-action="egg-arrange">${icon('count')}<span>排列卡片</span>${icon('arrow','chevron')}</button><button class="list-button" type="button" data-action="egg-only">${icon('target')}<span>${state.eggOnlyLeft?'显示全部物品':'只看本轮还缺的'}</span>${icon('arrow','chevron')}</button>`);return;}
  if(a==='egg-add'){const id=node.dataset.id;await mutateEgg(egg=>C.eggChange(egg,id,1),{placedId:id});return;}
  if(a==='egg-minus'){const id=node.dataset.id;try{await mutateEgg(egg=>C.eggChange(egg,id,-1));}catch(err){toast(err.message);}return;}
- if(a==='egg-rename'){const item=eggBook().items.find(i=>i.id===id);if(!item)return;showSheet('修改名字',`<label class="field-label" for="name">物品名称</label><input class="field-input" id="name" name="name" maxlength="40" value="${e(item.name)}">`,async fd=>{await mutateEgg(egg=>C.eggRename(egg,id,String(fd.get('name')||'')));return true;});return;}
+ if(a==='egg-manage'){showEggItemManager();return;}
+ if(a==='egg-delete-item'){const item=eggBook().items.find(i=>i.id===id);if(!item)return;showSheet('删除 '+item.name+'？',`<p>将删除这个物品及其 ${eggBook().records.filter(r=>r.itemId===id).length} 条记录，累计数量也会移除。需要保留时请先导出备份。</p>`,async()=>{await mutateEgg(egg=>C.eggDeleteItem(egg,id));state.eggItemID=null;state.eggSelection.clear();state.ratioSelected.delete(id);delete state.ratioValues[id];render();showEggItemManager();return false;},'删除物品');return;}
+ if(a==='egg-rename'){const item=eggBook().items.find(i=>i.id===id);if(!item)return;showSheet('修改名字',`<label class="field-label" for="name">物品名称</label><input class="field-input" id="name" name="name" maxlength="40" value="${e(item.name)}">`,async fd=>{await mutateEgg(egg=>C.eggRename(egg,id,String(fd.get('name')||'')));if(node.dataset.manager){showEggItemManager();return false;}return true;});return;}
  if(a==='stats-gran'){state.statsGran=node.dataset.gran;render();return;}
  if(a==='stats-filter'){const id=node.dataset.id||null;state.statsItem=state.statsItem===id?null:id;if(state.book!=='egg')state.range=0;state.selectedHour=null;state.eggStatsLimit=80;render();return;}
  if(a==='egg-stats-more'){state.eggStatsLimit=(state.eggStatsLimit||80)+80;render();return;}

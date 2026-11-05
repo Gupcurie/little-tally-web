@@ -125,9 +125,9 @@ function statusPill(account) {
 function updateSelection() {
   const ids = Array.from(SELECTED);
   $('btn-sum').disabled = ids.length < 1;
-  $('btn-diff').disabled = ids.length !== 2;
+  $('btn-diff').disabled = ids.length < 2;
   if (!ids.length) {
-    $('sel-info').textContent = '未选择账号 · 勾选后可汇总或相减，顺序即 A、B';
+    $('sel-info').textContent = '未选择账号 · 勾选后可汇总或相减，首个账号减其余账号';
     return;
   }
   const names = ids.map((id) => {
@@ -418,8 +418,9 @@ function renderAccountEggPlan(target, core, egg, saved) {
 async function runAggregate(op) {
   const ids = Array.from(SELECTED);
   if (!ids.length) return;
-  if (op === 'diff' && ids.length !== 2) {
-    showError('相减需要正好选择 2 个账号（顺序即 A、B）');
+  if(ids.length>40){showError('每次最多计算40个账号，请减少选择。');return;}
+  if (op === 'diff' && ids.length < 2) {
+    showError('相减至少选择 2 个账号，首个账号减去其余账号');
     return;
   }
   showError('');
@@ -434,12 +435,30 @@ async function runAggregate(op) {
   }
 }
 
+function aggregateText(data){
+ const label=BOOK_LABELS[data.book]||data.book,op=data.op==='diff'?'相减':'相加';
+ const lines=[label+' · '+op+'结果','计算时间：'+fmtDate(Date.now()),'计算：'+data.users.map(u=>u.username||u.id.slice(0,6)).join(data.op==='diff'?' − ':' + ')];
+ if(data.missing?.length)lines.push('注：没有账本的账号按0计算。');
+ lines.push(['物品',...data.users.map(u=>u.username||u.id.slice(0,6)),data.op==='diff'?'差值（首个减其余）':'合计'].join('\t'));
+ for(const row of data.rows)lines.push([row.name,...row.values,data.op==='diff'?row.diff:row.sum].join('\t'));
+ lines.push('总计\t'+data.rows.reduce((n,r)=>n+(data.op==='diff'?r.diff:r.sum),0));
+ return lines.join('\n');
+}
+
 function renderAggregate(data) {
   const bookLabel = BOOK_LABELS[data.book] || data.book;
   $('a-title').textContent = (data.op === 'diff' ? '相减 ' : '相加汇总 · ') + bookLabel;
 
   const body = $('a-body');
   body.textContent = '';
+  const expression=data.users.map(u=>u.username||u.id.slice(0,6)).join(data.op==='diff'?' − ':' + ');
+  const formula=el('p','muted small','计算：'+expression);formula.setAttribute('style','overflow-wrap:anywhere');body.appendChild(formula);
+  const copy=el('button','primary-refresh','一键复制结果');copy.type='button';
+  copy.addEventListener('click',async()=>{
+    const text=aggregateText(data),ok=await copyText(text);
+    if(!ok){const field=el('textarea');field.value=text;field.readOnly=true;field.setAttribute('aria-label','可手动复制的计算结果');field.style.width='100%';field.rows=10;body.appendChild(field);field.focus();field.select();}
+    flash(ok?'已复制计算结果':'请长按下方文本全选复制');
+  });body.appendChild(copy);
 
   if (data.missing && data.missing.length) {
     body.appendChild(el('p', 'muted small', '有账号还没有账本，按 0 计算。'));
@@ -457,7 +476,7 @@ function renderAggregate(data) {
   for (const user of data.users) {
     head.appendChild(el('th', null, user.username || user.id.slice(0, 6)));
   }
-  head.appendChild(el('th', null, data.op === 'diff' ? '差值 A−B' : '合计'));
+  head.appendChild(el('th', null, data.op === 'diff' ? (data.users.length===2?'差值 A−B':'差值（首个减其余）') : '合计'));
   table.appendChild(head);
 
   for (const row of data.rows) {
@@ -472,19 +491,6 @@ function renderAggregate(data) {
   scroll.appendChild(table);
   body.appendChild(scroll);
 
-  const copy = el('button', 'ghost small', '复制表格');
-  copy.type = 'button';
-  copy.addEventListener('click', async () => {
-    const lines = [['物品'].concat(data.users.map((u) => u.username || u.id.slice(0, 6)))
-      .concat([data.op === 'diff' ? '差值 A-B' : '合计']).join('\t')];
-    for (const row of data.rows) {
-      lines.push([row.name].concat(row.values.map(String))
-        .concat([String(data.op === 'diff' ? row.diff : row.sum)]).join('\t'));
-    }
-    const ok = await copyText(lines.join('\n'));
-    flash(ok ? '已复制表格到剪贴板' : '复制失败');
-  });
-  body.appendChild(copy);
   $('agg').hidden = false;
 }
 

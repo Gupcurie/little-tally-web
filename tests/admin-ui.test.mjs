@@ -129,3 +129,17 @@ test('refreshing an open account detail updates its quantities and version state
  assert.match(nodes['d-body'].textContent,/总数 7 个/);assert.match(nodes['d-body'].textContent,/整轮推荐已同步/);
  assert.equal(nodes['d-refresh'].disabled,false);
 });
+
+
+test('all three books copy separate multi-account results including negative totals and account order',async()=>{
+ const nodes=await loadPage();let copied='';nodes.context.capture=text=>{copied=text;return true;};
+ vm.runInContext('copyText=async text=>capture(text)',nodes.context);
+ for(const book of ['egg','sales','stock'])for(const op of ['sum','diff']){
+  const data={book,op,users:[{username:'甲'},{username:'乙'},{username:'丙'}],rows:[{name:'奖品',values:[5,3,4],sum:12,diff:-2}]};
+  vm.runInContext('renderAggregate('+JSON.stringify(data)+')',nodes.context);
+  const copy=nodes['a-body'].children.find(e=>e.textContent==='一键复制结果');assert.ok(copy);await copy.listeners.click();
+  assert.match(copied,op==='diff'?/甲 − 乙 − 丙/:/甲 \+ 乙 \+ 丙/);
+  assert.match(copied,op==='diff'?/总计\t-2/:/总计\t12/);
+  assert.match(copied,new RegExp({egg:'放蛋',sales:'销售',stock:'库存'}[book]+'账本'));
+ }
+});

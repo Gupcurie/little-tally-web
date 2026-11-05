@@ -215,8 +215,8 @@ def aggregate(ids, names, book_key, op):
     for entry in rows.values():
         values = [entry['per_user'].get(uid, 0) for uid in ids]
         record = {'name': entry['name'], 'values': values, 'sum': sum(values)}
-        if op == 'diff' and len(ids) == 2:
-            record['diff'] = values[0] - values[1]
+        if op == 'diff' and len(ids) >= 2:
+            record['diff'] = values[0] - sum(values[1:])
         out.append(record)
     out.sort(key=lambda r: (-abs(r['diff'] if 'diff' in r else r['sum']), r['name']))
     return {
@@ -616,8 +616,8 @@ class Handler(BaseHTTPRequestHandler):
             if not ids:
                 self._json(400, {'error': 'NO_ACCOUNTS'})
                 return
-            if op == 'diff' and len(ids) != 2:
-                self._json(400, {'error': 'DIFF_NEEDS_TWO'})
+            if op == 'diff' and len(ids) < 2:
+                self._json(400, {'error': 'DIFF_NEEDS_AT_LEAST_TWO'})
                 return
             try:
                 accounts = fetch_accounts()

@@ -134,6 +134,21 @@ class AdminBooksTest(unittest.TestCase):
             self.assertEqual(result['rows'][0]['diff'], 2)
         self.assertEqual(ledgers, before)
 
+    def test_multi_account_diff_is_first_minus_all_others_for_each_book(self):
+        third = '00000000-0000-4000-8000-000000000003'
+        ledgers = {uid: {'payload': payload()} for uid in [A, B, third]}
+        before = copy.deepcopy(ledgers)
+        with patch.object(admin, 'fetch_ledgers', return_value=ledgers):
+            for key, expected in [('sales', -5), ('stock', -8), ('egg', -5)]:
+                result = admin.aggregate([A, B, third], {}, key, 'diff')
+                self.assertEqual(result['rows'][0]['diff'], expected)
+        self.assertEqual(ledgers, before)
+        handler = Handler();handler.body.update(ids=[A, B, third], op='diff')
+        with patch.object(admin, 'fetch_accounts', return_value=[{'id': uid, 'username': uid} for uid in [A, B, third]]), patch.object(admin, 'aggregate', return_value={'rows': []}) as calculate, patch.object(admin, 'audit'):
+            admin.Handler.do_POST(handler)
+            self.assertEqual(handler.response[0], 200)
+            self.assertEqual(calculate.call_args.args[0], [A, B, third])
+
     def test_missing_egg_book_aggregates_as_zero(self):
         ledgers = {A: {'payload': {'egg': book('放蛋物品', [2])}}, B: {'payload': {}}}
         with patch.object(admin, 'fetch_ledgers', return_value=ledgers):

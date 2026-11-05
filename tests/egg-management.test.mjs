@@ -1,0 +1,9 @@
+import test from 'node:test';import assert from 'node:assert/strict';import {readFileSync} from 'node:fs';import vm from 'node:vm';import * as C from '../dist/core.js';
+function fixture(){const egg=C.emptyEgg();C.eggAddItem(egg,'鼠标垫',8);C.eggAddItem(egg,'徽章',1);C.eggChange(egg,egg.items[0].id,1);C.eggChange(egg,egg.items[1].id,1);return egg;}
+test('rename retains identity, count and records and rejects duplicate names',()=>{const e=fixture(),id=e.items[0].id,records=JSON.stringify(e.records);C.eggRename(e,id,'火星鼠标垫');assert.equal(e.items[0].id,id);assert.equal(C.eggCounts(e)[id],1);assert.equal(JSON.stringify(e.records),records);assert.throws(()=>C.eggRename(e,id,'徽章'));});
+test('real delete action confirms first, removes only the selected item and recalculates the saved recommendation',async()=>{
+ const egg=fixture(),id=egg.items[0].id,keep=egg.items[1].id;let confirm,managed=0;
+ const ctx=vm.createContext({C,eggBook:()=>egg,state:{eggItemID:id,eggSelection:new Set(['record']),ratioSelected:new Set([id]),ratioValues:{[id]:'8'}},showSheet:(title,body,callback)=>{confirm=callback;assert.match(body,/1 条记录/);},mutateEgg:async fn=>{fn(egg);egg.recommendation=C.eggCreatePlan(egg);},render:()=>{},showEggItemManager:()=>managed++});
+ const source=readFileSync(new URL('../dist/app.js',import.meta.url),'utf8'),start=source.indexOf(" if(a==='egg-delete-item')"),end=source.indexOf(" if(a==='egg-rename')",start);
+ ctx.id=id;vm.runInContext('(async()=>{const a="egg-delete-item";'+source.slice(start,end)+'})()',ctx);assert.equal(egg.items.length,2);assert.ok(confirm);await confirm();assert.equal(egg.items.length,1);assert.equal(egg.items[0].id,keep);assert.equal(egg.records.length,1);assert.equal(egg.records[0].itemId,keep);assert.equal(ctx.state.eggItemID,null);assert.equal(ctx.state.ratioSelected.has(id),false);assert.equal(managed,1);assert.ok(!JSON.stringify(egg.recommendation).includes(id));C.validateEgg(egg);
+});
