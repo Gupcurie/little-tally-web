@@ -435,92 +435,53 @@ async function runAggregate(op) {
   }
 }
 
+function aggregateValue(data,row){return data.op==='diff'?row.diff:row.sum;}
+function aggregateText(data,mode='process'){
+ const label=BOOK_LABELS[data.book]||data.book,op=data.op==='diff'?'相减':'相加',process=mode==='process';
+ const lines=[label+' · '+op+'结果','计算时间：'+fmtDate(Date.now())];
+ if(process)lines.push('计算：'+data.users.map(u=>u.username||u.id.slice(0,6)).join(data.op==='diff'?' − ':' + '));
+ if(data.missing?.length)lines.push('注：没有账本的账号按0计算。');
+ const resultLabel=data.op==='diff'?'差值（首个减其余）':'合计';
+ lines.push(['物品',...(process?data.users.map(u=>u.username||u.id.slice(0,6)):[]),resultLabel].join('\t'));
+ for(const row of data.rows)lines.push([row.name,...(process?row.values:[]),aggregateValue(data,row)].join('\t'));
+ lines.push(['总计',...(process?data.users.map((_,k)=>data.rows.reduce((n,row)=>n+row.values[k],0)):[]),data.rows.reduce((n,row)=>n+aggregateValue(data,row),0)].join('\t'));
+ return lines.join('\n');
+}
+async function copyAggregateResult(data,target,mode){
+ const text=aggregateText(data,mode),ok=await copyText(text);
+ if(!ok){const field=el('textarea');field.value=text;field.readOnly=true;field.setAttribute('aria-label','可手动复制的计算结果');field.style.width='100%';field.rows=10;target.appendChild(field);field.focus();field.select();}
+ flash(ok?'已复制'+(mode==='result'?'结果':'过程和结果'):'请长按下方文本全选复制');
+}
+function aggregateSection(data){
+ const section=el('section','aggregate-book');section.appendChild(el('h3',null,BOOK_LABELS[data.book]||data.book));
+ section.appendChild(el('p','muted small','计算：'+data.users.map(u=>u.username||u.id.slice(0,6)).join(data.op==='diff'?' − ':' + ')));
+ const actions=el('div','aggregate-copy-actions');
+ for(const [mode,label] of [['result','复制结果'],['process','复制过程和结果']]){
+  const button=el('button',mode==='result'?'primary-refresh':'ghost',label);button.type='button';button.addEventListener('click',()=>copyAggregateResult(data,section,mode));actions.appendChild(button);
+ }section.appendChild(actions);
+ if(data.missing?.length)section.appendChild(el('p','muted small','其中'+data.missing.length+'个账号尚未保存账本，按0计算。'));
+ const scroll=el('div','table-scroll aggregate-table-scroll');scroll.setAttribute('tabindex','0');scroll.setAttribute('role','region');scroll.setAttribute('aria-label',(BOOK_LABELS[data.book]||data.book)+'计算表格，可左右滑动');
+ const table=el('table','agg aggregate-table'),thead=el('thead'),head=el('tr');
+ head.appendChild(el('th',null,'物品'));for(const user of data.users)head.appendChild(el('th',null,user.username||user.id.slice(0,6)));
+ head.appendChild(el('th',null,data.op==='diff'?(data.users.length===2?'结果（差值 A−B）':'结果（差值：首个减其余）'):'结果（合计）'));thead.appendChild(head);table.appendChild(thead);
+ const tbody=el('tbody');
+ for(const row of data.rows){const tr=el('tr');tr.appendChild(el('th',null,row.name));for(const value of row.values)tr.appendChild(el('td','num',String(value)));tr.appendChild(el('td','num total',String(aggregateValue(data,row))));tbody.appendChild(tr);}table.appendChild(tbody);
+ const tfoot=el('tfoot'),foot=el('tr');foot.appendChild(el('th',null,'总计'));
+ data.users.forEach((_,k)=>foot.appendChild(el('td','num',String(data.rows.reduce((n,row)=>n+row.values[k],0)))));
+ foot.appendChild(el('td','num total',String(data.rows.reduce((n,row)=>n+aggregateValue(data,row),0))));tfoot.appendChild(foot);table.appendChild(tfoot);scroll.appendChild(table);section.appendChild(scroll);
+ section.appendChild(el('p','muted small','账号较多时可左右滑动表格，最右侧为计算结果。'));
+ if(!data.rows.length)section.appendChild(el('p','muted','当前所选账号在此账本没有物品。'));
+ return section;
+}
 function renderAllAggregates(data){
  const body=$('a-body');body.textContent='';$('a-title').textContent='多账号'+(data.op==='diff'?'相减':'相加')+'结果';
  const first=$('book').value;
- for(const key of [first,...['egg','sales','stock'].filter(k=>k!==first)]){
-  const result=data.books[key];if(!result)continue;
-  const section=el('section','aggregate-book');section.appendChild(el('h3',null,BOOK_LABELS[key]));
-  const formula=el('p','muted small','计算：'+result.users.map(u=>u.username||u.id.slice(0,6)).join(result.op==='diff'?' − ':' + '));section.appendChild(formula);
-  const total=result.rows.reduce((n,r)=>n+(result.op==='diff'?r.diff:r.sum),0);
-  section.appendChild(el('p','aggregate-total',(result.op==='diff'?'差值总计：':'合计：')+total));
-  const copy=el('button','primary-refresh','一键复制'+BOOK_LABELS[key]+'结果');copy.type='button';
-  copy.addEventListener('click',()=>copyAggregateResult(result,section));section.appendChild(copy);
-  if(result.missing?.length)section.appendChild(el('p','muted small','其中'+result.missing.length+'个账号尚未保存账本，按0计算。'));
-  const accounts=el('details','aggregate-accounts');accounts.appendChild(el('summary',null,'查看各账号累计数量（'+result.users.length+'个账号）'));
-  result.users.forEach((u,k)=>accounts.appendChild(el('p',null,(u.username||u.id.slice(0,6))+'：'+result.rows.reduce((n,row)=>n+row.values[k],0))));section.appendChild(accounts);
-  if(!result.rows.length)section.appendChild(el('p','muted','当前所选账号在此账本没有物品。'));
-  for(const row of result.rows){
-   const item=el('details','aggregate-item'),head=el('summary');head.appendChild(el('span',null,row.name));head.appendChild(el('strong',null,String(result.op==='diff'?row.diff:row.sum)));item.appendChild(head);
-   result.users.forEach((u,k)=>{const line=el('div','aggregate-value');line.appendChild(el('span',null,u.username||u.id.slice(0,6)));line.appendChild(el('strong',null,String(row.values[k])));item.appendChild(line);});section.appendChild(item);
-  }
-  body.appendChild(section);
- }
+ for(const key of [first,...['egg','sales','stock'].filter(k=>k!==first)])if(data.books[key])body.appendChild(aggregateSection(data.books[key]));
  $('agg').hidden=false;
 }
-async function copyAggregateResult(data,target){
- const text=aggregateText(data),ok=await copyText(text);
- if(!ok){const field=el('textarea');field.value=text;field.readOnly=true;field.setAttribute('aria-label','可手动复制的计算结果');field.style.width='100%';field.rows=10;target.appendChild(field);field.focus();field.select();}
- flash(ok?'已复制计算结果':'请长按下方文本全选复制');
-}
-
-function aggregateText(data){
- const label=BOOK_LABELS[data.book]||data.book,op=data.op==='diff'?'相减':'相加';
- const lines=[label+' · '+op+'结果','计算时间：'+fmtDate(Date.now()),'计算：'+data.users.map(u=>u.username||u.id.slice(0,6)).join(data.op==='diff'?' − ':' + ')];
- if(data.missing?.length)lines.push('注：没有账本的账号按0计算。');
- lines.push(['物品',...data.users.map(u=>u.username||u.id.slice(0,6)),data.op==='diff'?'差值（首个减其余）':'合计'].join('\t'));
- for(const row of data.rows)lines.push([row.name,...row.values,data.op==='diff'?row.diff:row.sum].join('\t'));
- lines.push('总计\t'+data.rows.reduce((n,r)=>n+(data.op==='diff'?r.diff:r.sum),0));
- return lines.join('\n');
-}
-
-function renderAggregate(data) {
-  const bookLabel = BOOK_LABELS[data.book] || data.book;
-  $('a-title').textContent = (data.op === 'diff' ? '相减 ' : '相加汇总 · ') + bookLabel;
-
-  const body = $('a-body');
-  body.textContent = '';
-  const expression=data.users.map(u=>u.username||u.id.slice(0,6)).join(data.op==='diff'?' − ':' + ');
-  const formula=el('p','muted small','计算：'+expression);formula.setAttribute('style','overflow-wrap:anywhere');body.appendChild(formula);
-  const copy=el('button','primary-refresh','一键复制结果');copy.type='button';
-  copy.addEventListener('click',async()=>{
-    const text=aggregateText(data),ok=await copyText(text);
-    if(!ok){const field=el('textarea');field.value=text;field.readOnly=true;field.setAttribute('aria-label','可手动复制的计算结果');field.style.width='100%';field.rows=10;body.appendChild(field);field.focus();field.select();}
-    flash(ok?'已复制计算结果':'请长按下方文本全选复制');
-  });body.appendChild(copy);
-
-  if (data.missing && data.missing.length) {
-    body.appendChild(el('p', 'muted small', '有账号还没有账本，按 0 计算。'));
-  }
-  if (!data.rows.length) {
-    body.appendChild(el('p', 'muted', '这些账号在所选账本里没有物品。'));
-    $('agg').hidden = false;
-    return;
-  }
-
-  const scroll = el('div', 'table-scroll');
-  const table = el('table', 'agg');
-  const head = el('tr');
-  head.appendChild(el('th', null, '物品'));
-  for (const user of data.users) {
-    head.appendChild(el('th', null, user.username || user.id.slice(0, 6)));
-  }
-  head.appendChild(el('th', null, data.op === 'diff' ? (data.users.length===2?'差值 A−B':'差值（首个减其余）') : '合计'));
-  table.appendChild(head);
-
-  for (const row of data.rows) {
-    const tr = el('tr');
-    tr.appendChild(el('td', null, row.name));
-    row.values.forEach((value) => tr.appendChild(el('td', 'num', String(value))));
-    const total = data.op === 'diff' ? row.diff : row.sum;
-    const cell = el('td', 'num total', String(total));
-    tr.appendChild(cell);
-    table.appendChild(tr);
-  }
-  scroll.appendChild(table);
-  body.appendChild(scroll);
-
-  $('agg').hidden = false;
+function renderAggregate(data){
+ $('a-title').textContent=(data.op==='diff'?'相减 · ':'相加汇总 · ')+(BOOK_LABELS[data.book]||data.book);
+ const body=$('a-body');body.textContent='';body.appendChild(aggregateSection(data));$('agg').hidden=false;
 }
 
 async function loadAudit() {
