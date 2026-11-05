@@ -563,10 +563,11 @@ $('sel-all').addEventListener('change', (event) => {
 });
 async function loadSecurity(){
  try{const data=await api('/api/security'),body=$('security-body');body.textContent='';
- body.appendChild(el('p','muted small','异常请求不等于攻击成功。默认记录，不自动封IP；后台导出记录为管理操作。'));
- body.appendChild(el('p',null,'安全服务：'+data.agent.status+(data.agent.at?' · '+fmtDate(data.agent.at*1000):'')));
+ body.appendChild(el('p','muted small','资源缺失、访问拒绝和账本变更分别显示。异常记录不等于攻击成功；默认不自动封 IP。'));
+ const agentStatus=data.agent.status.startsWith('运行正常')?'运行正常 · 已封禁 '+(data.agent.blocked??data.blocked.length)+' 个 IP':data.agent.status;
+ body.appendChild(el('p',null,'安全服务：'+agentStatus+(data.agent.at?' · '+fmtDate(data.agent.at*1000):'')));
  for(const ip of data.blocked){const row=el('div','security-row');row.appendChild(el('span',null,'已封禁：'+ip));const btn=el('button','ghost','解除封禁');btn.addEventListener('click',()=>setIpBlock(ip,false));row.appendChild(btn);body.appendChild(row);}
- for(const event of data.entries){const row=el('div','security-row');const at=typeof event.at==='number'?event.at*1000:event.at;row.appendChild(el('span',null,fmtDate(at)+' · '+event.ip+' · '+event.kind+' · '+event.detail));const btn=el('button','ghost small',data.blocked.includes(event.ip)?'解除封禁':'封禁此IP');btn.addEventListener('click',()=>setIpBlock(event.ip,!data.blocked.includes(event.ip)));row.appendChild(btn);body.appendChild(row);}
+ for(const event of data.entries){const row=el('div','security-row');const at=typeof event.at==='number'?event.at*1000:event.at;row.appendChild(el('span',null,fmtDate(at)+' · '+event.ip+(event.ip===data.current_ip?'（当前连接）':'')+' · '+event.kind+' · '+event.detail));if(event.ip!==data.current_ip&&event.can_block!==false){const btn=el('button','ghost small',data.blocked.includes(event.ip)?'解除封禁':'封禁此IP');btn.addEventListener('click',()=>setIpBlock(event.ip,!data.blocked.includes(event.ip)));row.appendChild(btn);}body.appendChild(row);}
  if(!data.entries.length)body.appendChild(el('p','muted','暂未记录到异常。'));
  }catch(err){showError('安全记录读取失败：'+err.message);}
 }

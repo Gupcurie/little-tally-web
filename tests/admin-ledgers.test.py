@@ -209,6 +209,28 @@ class AdminBooksTest(unittest.TestCase):
             handler=Handler();handler.path='/admin/api/security/block';handler.body={'ip':ip,'blocked':True};handler.headers={'X-Forwarded-For':'198.51.100.1'}
             admin.Handler.do_POST(handler);self.assertEqual(handler.response[0],400)
 
+    def test_old_browser_icon_misses_are_hidden_without_hiding_real_refusals(self):
+        def legacy(path, status, method='GET', kind='请求被拒绝或资源不存在'):
+            return {'at':1,'ip':'198.51.100.24','kind':kind,'detail':f'{method} {path} · HTTP {status}'}
+        self.assertIsNone(admin.display_network_event(legacy('/favicon.ico',404)))
+        self.assertIsNone(admin.display_network_event(legacy('/robots.txt',404,'HEAD')))
+        self.assertEqual(admin.display_network_event(legacy('/favicon.ico',403))['kind'],'访问被拒绝')
+        self.assertEqual(admin.display_network_event(legacy('/admin/api/login',401,'POST'))['kind'],'未登录或登录未通过')
+        self.assertEqual(admin.display_network_event(legacy('/missing.css',404))['can_block'],False)
+        self.assertEqual(admin.display_network_event(legacy('/.env',404,kind='敏感路径探测'))['kind'],'敏感路径探测')
+        event=legacy('/favicon.ico',404)
+        before=copy.deepcopy(event);admin.display_network_event(event);self.assertEqual(event,before)
+
+    def test_security_collector_keeps_scans_and_denials_but_skips_routine_browser_misses(self):
+        agent_path=path.parents[1]/'security'/'security_agent.py'
+        spec=importlib.util.spec_from_file_location('security_agent_test',agent_path)
+        agent=importlib.util.module_from_spec(spec);spec.loader.exec_module(agent)
+        request={'at':1,'ip':'198.51.100.24','method':'GET','path':'/favicon.ico','status':404}
+        self.assertIsNone(agent.classify_request(request))
+        self.assertEqual(agent.classify_request(dict(request,status=403))['kind'],'访问被拒绝')
+        self.assertEqual(agent.classify_request(dict(request,path='/.env'))['kind'],'敏感路径探测')
+        self.assertEqual(agent.classify_request(dict(request,path='/missing.css'))['kind'],'资源不存在')
+
     def test_invalid_book_and_unauthenticated_requests_are_rejected(self):
         for key in ('invalid', {}, None):
             handler = Handler(key)

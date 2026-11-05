@@ -22,7 +22,7 @@ async function loadPage({missingUpdated=false,failApi=false,recommendation=null}
  const timers=[];nodes['auto-refresh'].checked=true;
  const context=vm.createContext({document:{getElementById:id=>nodes[id]||null,createElement:()=>new Element(),cookie:'',visibilityState:'visible',addEventListener:()=>{}},window:{location:{href:''}},Date,Set,setTimeout,setInterval:fn=>{timers.push(fn);return 1;},fetch:async url=>{
   if(failApi&&url.endsWith('/accounts'))return {status:503,ok:false,json:async()=>({error:'BACKEND_UNAVAILABLE'})};
-  return {status:200,ok:true,json:async()=>url.endsWith('/recommendation')?{egg:recommendation}:url.endsWith('/security')?{entries:[{at:1793880000,ip:'198.51.100.24',kind:'请求被拒绝',detail:'GET /test HTTP 404'}],blocked:[],agent:{status:'运行正常'}}:url.endsWith('/audit')?{entries:[]}:{accounts:[JSON.parse(JSON.stringify(account))],summary:{total:1,active:1,banned:0,with_ledger:1,items:11,records:2,signed_in_7d:1},generated_at:1793491200}};
+  return {status:200,ok:true,json:async()=>url.endsWith('/recommendation')?{egg:recommendation}:url.endsWith('/security')?{entries:[{at:1793880000,ip:'198.51.100.24',kind:'访问被拒绝',detail:'GET /test HTTP 403'},{at:1793880001,ip:'198.51.100.25',kind:'管理操作',detail:'后台导出账本'},{at:1793880002,ip:'198.51.100.26',kind:'资源不存在',detail:'GET /missing.css HTTP 404',can_block:false}],current_ip:'198.51.100.25',blocked:[],agent:{status:'运行正常',blocked:0}}:url.endsWith('/audit')?{entries:[]}:{accounts:[JSON.parse(JSON.stringify(account))],summary:{total:1,active:1,banned:0,with_ledger:1,items:11,records:2,signed_in_7d:1},generated_at:1793491200}};
  }});
  // Run real event wiring, fetch, summary rendering and row rendering from the shipped script.
  const withoutAutoLoad=script.replace(/\nload\(\);\s*$/,'');
@@ -167,4 +167,4 @@ test('aggregate tables align account columns and offer result-only or full-proce
 });
 
 
-test('security opens its own admin panel with full IP, time, behavior and a manual block action',async()=>{const nodes=await loadPage();nodes['security-panel'].hidden=true;await nodes['security-open'].listeners.click();assert.equal(nodes['security-panel'].hidden,false);assert.match(nodes['security-body'].textContent,/198\.51\.100\.24/);assert.match(nodes['security-body'].textContent,/请求被拒绝/);assert.match(nodes['security-body'].textContent,/封禁此IP/);});
+test('security opens its own admin panel with full IP, time, behavior and a manual block action',async()=>{const nodes=await loadPage();nodes['security-panel'].hidden=true;await nodes['security-open'].listeners.click();assert.equal(nodes['security-panel'].hidden,false);assert.match(nodes['security-body'].textContent,/198\.51\.100\.24/);assert.match(nodes['security-body'].textContent,/访问被拒绝/);assert.match(nodes['security-body'].textContent,/198\.51\.100\.25（当前连接）/);assert.match(nodes['security-body'].textContent,/已封禁 0 个 IP/);assert.equal((nodes['security-body'].textContent.match(/封禁此IP/g)||[]).length,1);});

@@ -242,6 +242,22 @@ def aggregate(ids, names, book_key, op, ledgers=None):
     }
 
 
+def display_network_event(event):
+    if not isinstance(event, dict): return None
+    method, path, status = (event.get(k) for k in ('method', 'path', 'status'))
+    if not isinstance(status, int):
+        match = re.fullmatch(r'([A-Z]+) (/[^\r\n]*) · HTTP (\d{3})', str(event.get('detail', '')))
+        if not match: return event
+        method, path, status = match.group(1), match.group(2), int(match.group(3))
+    if status == 404 and method in ('GET', 'HEAD') and path in ('/favicon.ico', '/robots.txt'):
+        return None
+    if event.get('kind') == '请求被拒绝或资源不存在':
+        event = dict(event, kind={400:'请求格式错误',401:'未登录或登录未通过',403:'访问被拒绝',404:'资源不存在',405:'请求方式不允许',408:'请求超时',413:'请求体过大'}.get(status,'HTTP '+str(status)))
+    if status == 404 and event.get('kind') == '资源不存在':
+        event = dict(event, can_block=False)
+    return event
+
+
 def security_snapshot():
     entries = []
     path = os.path.join(DATA_DIR, 'network', 'events.jsonl')
@@ -249,7 +265,9 @@ def security_snapshot():
         with open(path, 'rb') as fh:
             fh.seek(max(0, os.fstat(fh.fileno()).st_size - 1024 * 1024))
             for line in fh.read().splitlines():
-                try: entries.append(json.loads(line))
+                try:
+                    event = display_network_event(json.loads(line))
+                    if event is not None: entries.append(event)
                 except (ValueError, UnicodeError): pass
     except OSError: pass
     for event in read_audit(200):
@@ -623,7 +641,7 @@ class Handler(BaseHTTPRequestHandler):
             return
 
         if path == '/api/security':
-            self._json(200, security_snapshot())
+            self._json(200, {**security_snapshot(), 'current_ip': client_ip(self)})
             return
 
         if path == '/api/audit':
