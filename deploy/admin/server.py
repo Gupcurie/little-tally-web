@@ -286,7 +286,7 @@ def display_network_event(event):
     return event
 
 
-def security_snapshot():
+def security_snapshot(admin_slot):
     entries = []
     path = os.path.join(DATA_DIR, 'network', 'events.jsonl')
     try:
@@ -298,7 +298,7 @@ def security_snapshot():
                     if event is not None: entries.append(event)
                 except (ValueError, UnicodeError): pass
     except OSError: pass
-    for event in read_audit(200, 'primary'):
+    for event in read_audit(200, admin_slot):
         if event.get('result') != 'ok' or event.get('action') in ('export', 'security_block', 'security_unblock'):
             entries.append({'at': event['ts'], 'ip': event.get('ip', ''), 'kind': '管理操作' if event.get('result') == 'ok' else '管理请求失败', 'detail': {'export':'后台导出账本','login':'后台登录','security_block':'管理员提交封禁','security_unblock':'管理员解除封禁'}.get(event.get('action'), event.get('action', '')) + (' · ' + event['note'] if event.get('note') else '')})
     status, events = supabase('/rest/v1/rpc/tally_admin_security', method='POST', body={})
@@ -555,12 +555,6 @@ class Handler(BaseHTTPRequestHandler):
         token = self.headers.get('X-CSRF') or ''
         return bool(token) and hmac.compare_digest(token, claims.get('csrf', ''))
 
-    def _check_primary(self, admin_slot):
-        if admin_slot == 'primary':
-            return True
-        self._json(403, {'error': '此功能由管理员 1 管理'})
-        return False
-
     # -- export ------------------------------------------------------------ #
     def _export(self, user_id, fmt, admin_slot):
         team = next((t for t in fetch_teams() if t['id'] == user_id), None)
@@ -679,8 +673,7 @@ class Handler(BaseHTTPRequestHandler):
             return
 
         if path == '/api/security':
-            if self._check_primary(admin_slot):
-                self._json(200, {**security_snapshot(), 'current_ip': client_ip(self)})
+            self._json(200, {**security_snapshot(admin_slot), 'current_ip': client_ip(self)})
             return
 
         if path == '/api/audit':
@@ -722,8 +715,6 @@ class Handler(BaseHTTPRequestHandler):
             return
 
         if path == '/api/security/block':
-            if not self._check_primary(admin_slot):
-                return
             body = self._body() or {}
             try:
                 address = ipaddress.ip_address(str(body.get('ip', '')).strip())

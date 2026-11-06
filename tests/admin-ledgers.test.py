@@ -45,7 +45,6 @@ class Handler:
     def _csrf_ok(self, claims): return True
     def _body(self): return self.body
     def _json(self, status, data): self.response = (status, data)
-    _check_primary = admin.Handler._check_primary
 
 class AdminBooksTest(unittest.TestCase):
     def test_activity_ignores_recommendation_only_saves_and_detects_real_ledger_edits(self):
@@ -311,11 +310,20 @@ class AdminProfilesTest(unittest.TestCase):
         for slot, title in [('primary', '管理员 1 导出'), ('secondary', '管理员 2 导出')]:
             self.assertEqual([e['target_name'] for e in self.request(slot, 'audit')[1]['entries']], [title])
 
-    def test_site_security_is_reserved_for_primary(self):
-        with patch.object(admin, 'security_snapshot') as snapshot:
-            self.assertEqual(self.request('secondary', 'security')[0], 403)
-            self.assertEqual(self.request('secondary', 'security/block', {})[0], 403)
-            snapshot.assert_not_called()
+    def test_both_admins_share_security_rules_and_see_only_their_own_actions(self):
+        ip = '198.51.100.20'
+        with patch.object(admin, 'supabase', return_value=(200, [])):
+            self.assertEqual(self.request('secondary', 'security/block', {'ip': ip, 'blocked': True})[0], 200)
+            self.assertEqual(self.request('primary', 'security')[1]['blocked'], [ip])
+            self.assertEqual(self.request('primary', 'security')[1]['entries'], [])
+            own = self.request('secondary', 'security')[1]
+            self.assertEqual(own['blocked'], [ip])
+            self.assertEqual(len(own['entries']), 1)
+            self.assertIn('管理员提交封禁', own['entries'][0]['detail'])
+            self.assertEqual(self.request('primary', 'security/block', {'ip': ip, 'blocked': False})[0], 200)
+            self.assertEqual(self.request('secondary', 'security')[1]['blocked'], [])
+            self.assertEqual(len(self.request('secondary', 'security')[1]['entries']), 1)
+            self.assertIn('管理员解除封禁', self.request('primary', 'security')[1]['entries'][0]['detail'])
 
 
 if __name__ == '__main__':

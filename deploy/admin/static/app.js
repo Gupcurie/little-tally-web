@@ -559,7 +559,7 @@ function setAdminSlot(slot) {
   $('security-body').textContent = '';
   $('audit').textContent = '';
   $('admin-position').textContent = slot === 'secondary' ? '管理员 2' : '管理员 1';
-  $('security-open').hidden = slot !== 'primary';
+  $('security-open').hidden = false;
 }
 
 async function load(options = {}) {
