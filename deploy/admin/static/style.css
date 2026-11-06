@@ -328,6 +328,20 @@ table.agg td.total { font-weight: 650; color: var(--accent); }
 
 .lines li:last-child { border-bottom: none; }
 
+.book-total {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  margin-top: 6px;
+  padding: 8px 0;
+  border-top: 1px solid var(--line);
+  color: var(--accent);
+  font-size: 14px;
+  font-variant-numeric: tabular-nums;
+}
+
 .pass {
   display: block;
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;

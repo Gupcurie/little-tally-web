@@ -18,7 +18,7 @@ async function loadPage({missingUpdated=false,failApi=false,recommendation=null}
  const nodes=Object.fromEntries([...html.matchAll(/\bid="([^"]+)"/g)].map(m=>[m[1],new Element()]));
  if(missingUpdated)delete nodes.updated;
  const account={id:'00000000-0000-4000-8000-000000000001',username:'test-account',items:11,records:2,revision:3,created_at:'2026-11-01T00:00:00Z',last_sign_in_at:null,
-  books:{sales:{items:9,records:0,lines:[]},stock:{items:0,records:0,lines:[]},egg:{items:2,records:2,total:2,round:1,lines:[{name:'放蛋奖品',total:2,ratio:1}]}}};
+  books:{sales:{items:9,records:0,lines:[{name:'T恤',total:5},{name:'徽章',total:3}]},stock:{items:0,records:0,lines:[]},egg:{items:2,records:2,total:2,round:1,lines:[{name:'放蛋奖品',total:2,ratio:1}]}}};
  const timers=[];nodes['auto-refresh'].checked=true;
  const context=vm.createContext({document:{getElementById:id=>nodes[id]||null,createElement:()=>new Element(),cookie:'',visibilityState:'visible',addEventListener:()=>{}},window:{location:{href:''}},Date,Set,setTimeout,setInterval:fn=>{timers.push(fn);return 1;},fetch:async url=>{
   if(failApi&&url.endsWith('/accounts'))return {status:503,ok:false,json:async()=>({error:'BACKEND_UNAVAILABLE'})};
@@ -56,13 +56,18 @@ test('a real API failure is reported as a read failure rather than a page-render
 test('aggregate book picker offers sales, stock and egg',()=>{
  for(const key of ['sales','stock','egg'])assert.match(html,new RegExp('<option value="'+key+'">'));
 });
-test('account list and detail display egg book counts with the right name and ratio',async()=>{
+test('account details end each ledger with its total and show the current egg round',async()=>{
  const nodes=await loadPage();
  assert.match(nodes.rows.textContent,/放蛋：2 物品 \/ 2 记录/);
  vm.runInContext('openDetail(ACCOUNTS[0])',nodes.context);
  assert.match(nodes['d-body'].textContent,/放蛋账本 · 2 物品 \/ 2 记录/);
- assert.match(nodes['d-body'].textContent,/总数 2 个 · 已完成 1 轮/);
  assert.match(nodes['d-body'].textContent,/比例 1/);
+ const books = nodes['d-body'].children.filter(node => node.className === 'book');
+ assert.equal(books.length, 3);
+ const footers = books.map(book => book.children.at(-1));
+ assert.ok(footers.every(footer => footer.className === 'book-total'));
+ assert.deepEqual(footers.map(footer => footer.children.map(child => child.textContent)),
+   [['总数 8 件'], ['总数 0 件'], ['总数 2 个', '当前第 2 轮']]);
 });
 test('egg sum and difference results are labeled as egg rather than stock',async()=>{
  const nodes=await loadPage();

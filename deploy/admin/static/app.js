@@ -351,13 +351,12 @@ function openDetail(account) {
   body.appendChild(meta);
 
   const books = account.books || {};
-  for (const key of Object.keys(books)) {
-    const book = books[key];
-    const title = BOOK_LABELS[key] || key;
+  for (const [key, title] of Object.entries(BOOK_LABELS)) {
+    const book = books[key] || {items: 0, records: 0, lines: []};
+    const isEgg = key === 'egg';
     const section = el('section', 'book');
     section.appendChild(el('h3', null, title + ' · ' + book.items + ' 物品 / ' + book.records + ' 记录'));
-    if (key === 'egg') {
-      section.appendChild(el('p', 'muted small', '总数 ' + (book.total || 0) + ' 个 · 已完成 ' + (book.round || 0) + ' 轮'));
+    if (isEgg && books.egg) {
       const preview = el('div', 'recommendation-preview');
       const view = el('button', 'ghost small', '查看当前推荐与本轮顺序');
       view.type = 'button';
@@ -373,11 +372,16 @@ function openDetail(account) {
       for (const line of book.lines) {
         const item = el('li');
         item.appendChild(el('span', null, line.name || '(未命名)'));
-        item.appendChild(el('strong', null, String(line.total) + (key === 'egg' && line.ratio ? ' · 比例 ' + line.ratio : '')));
+        item.appendChild(el('strong', null, String(line.total) + (isEgg && line.ratio ? ' · 比例 ' + line.ratio : '')));
         list.appendChild(item);
       }
       section.appendChild(list);
     }
+    const total = book.total ?? book.lines.reduce((sum, line) => sum + line.total, 0);
+    const footer = el('footer', 'book-total');
+    footer.appendChild(el('strong', null, '总数 ' + total.toLocaleString('zh-CN') + (isEgg ? ' 个' : ' 件')));
+    if (isEgg) footer.appendChild(el('span', null, '当前第 ' + ((book.round ?? 0) + 1) + ' 轮'));
+    section.appendChild(footer);
     body.appendChild(section);
   }
   $('detail').hidden = false;
