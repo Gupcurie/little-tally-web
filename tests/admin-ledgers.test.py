@@ -45,8 +45,6 @@ class Handler:
     def _csrf_ok(self, claims): return True
     def _body(self): return self.body
     def _json(self, status, data): self.response = (status, data)
-    _assignment_snapshot = admin.Handler._assignment_snapshot
-    _check_scope = admin.Handler._check_scope
     _check_primary = admin.Handler._check_primary
 
 class AdminBooksTest(unittest.TestCase):
@@ -249,7 +247,7 @@ class AdminBooksTest(unittest.TestCase):
         admin.Handler.do_POST(handler)
         self.assertEqual(handler.response[0], 401)
 
-class AdminScopeTest(unittest.TestCase):
+class AdminProfilesTest(unittest.TestCase):
     def setUp(self):
         directory = TemporaryDirectory()
         self.addCleanup(directory.cleanup)
@@ -283,52 +281,41 @@ class AdminScopeTest(unittest.TestCase):
         signature = hmac.new(admin.SESSION_SECRET, body.encode(), hashlib.sha256).hexdigest()
         self.assertIsNone(admin.read_session(body + '.' + signature))
 
-    def test_group_assignment_moves_visibility_and_can_be_reclaimed(self):
+    def test_both_admins_see_the_same_accounts_and_groups(self):
+        (Path(admin.DATA_DIR) / 'admin-assignments.json').write_text(json.dumps([B]), encoding='utf-8')
         with patch.object(admin, 'fetch_accounts', return_value=self.accounts):
-            self.assertEqual(self.request('secondary', 'accounts')[1]['summary']['total'], 0)
-            self.assertEqual(self.request('secondary', 'assignments', {'id': B, 'assigned': True})[0], 403)
-            self.assertEqual(self.request('primary', 'assignments', {'id': B, 'assigned': True})[0], 200)
-            primary = self.request('primary', 'accounts')[1]
-            secondary = self.request('secondary', 'accounts')[1]
-            self.assertEqual([a['id'] for a in primary['accounts']], [A])
-            self.assertEqual([a['id'] for a in secondary['accounts']], [B])
-            self.assertEqual(primary['summary']['records'], 3)
-            self.assertEqual(secondary['summary']['records'], 5)
-            self.assertEqual(self.request('primary', 'assignments')[1]['accounts'], [{'id': B, 'username': '群 · 乙'}])
-            self.assertEqual(self.request('primary', 'assignments', {'id': B, 'assigned': False})[0], 200)
-            self.assertEqual(self.request('secondary', 'accounts')[1]['accounts'], [])
+            for slot in admin.ADMIN_SLOTS:
+                status, data = self.request(slot, 'accounts')
+                self.assertEqual(status, 200)
+                self.assertEqual(data['admin_slot'], slot)
+                self.assertEqual([account['id'] for account in data['accounts']], [A, B])
+                self.assertEqual(data['summary']['records'], 8)
+                self.assertEqual(self.request(slot, 'assignments', {'id': A, 'assigned': True})[0], 404)
 
-    def test_cross_scope_paths_deny_before_accessing_supabase(self):
-        admin.set_account_assignment(B, True)
-        with patch.object(admin, 'supabase') as upstream, patch.object(admin, 'fetch_accounts') as fetch:
-            for slot, denied, allowed in [('primary', B, A), ('secondary', A, B)]:
-                for action in ['export', 'recommendation']:
-                    self.assertEqual(self.request(slot, 'accounts/' + denied.upper() + '/' + action)[0], 404)
-                for action in ['ban', 'password']:
-                    self.assertEqual(self.request(slot, 'accounts/' + denied + '/' + action, {})[0], 404)
-                self.assertEqual(self.request(slot, 'aggregate', {'ids': [allowed, denied], 'book': 'egg'})[0], 404)
-            self.assertEqual(self.request('secondary', 'security')[0], 403)
-            self.assertEqual(self.request('secondary', 'security/block', {})[0], 403)
-            upstream.assert_not_called()
-            fetch.assert_not_called()
+    def test_both_admins_read_and_aggregate_shared_ledgers(self):
+        ledgers = {id_: {'payload': payload()} for id_ in (A, B)}
+        with patch.object(admin, 'fetch_accounts', return_value=self.accounts), \
+             patch.object(admin, 'fetch_ledgers', return_value=ledgers):
+            for slot in admin.ADMIN_SLOTS:
+                for id_ in (A, B):
+                    status, result = self.request(slot, 'accounts/' + id_ + '/recommendation')
+                    self.assertEqual(status, 200)
+                    self.assertEqual(result['egg'], payload()['egg'])
+                status, result = self.request(slot, 'aggregate', {'ids': [A, B], 'book': 'egg'})
+                self.assertEqual(status, 200)
+                self.assertEqual(result['rows'][0]['sum'], 10)
 
-    def test_authorized_ledger_works_and_audit_is_separate(self):
-        admin.set_account_assignment(B, True)
-        admin.audit('export', A, '原管理员记录', admin_slot='primary')
-        admin.audit('export', B, '新增管理员记录', admin_slot='secondary')
-        with patch.object(admin, 'fetch_ledgers', return_value={B: {'payload': payload()}}):
-            result = self.request('secondary', 'accounts/' + B + '/recommendation')
-        self.assertEqual(result[0], 200)
-        self.assertEqual(result[1]['egg'], payload()['egg'])
-        for slot, title in [('primary', '原管理员记录'), ('secondary', '新增管理员记录')]:
+    def test_audit_stays_separate_when_admins_act_on_the_same_account(self):
+        admin.audit('export', A, '管理员 1 导出', admin_slot='primary')
+        admin.audit('export', A, '管理员 2 导出', admin_slot='secondary')
+        for slot, title in [('primary', '管理员 1 导出'), ('secondary', '管理员 2 导出')]:
             self.assertEqual([e['target_name'] for e in self.request(slot, 'audit')[1]['entries']], [title])
 
-    def test_corrupted_assignments_fail_closed_for_both_slots(self):
-        (Path(admin.DATA_DIR) / 'admin-assignments.json').write_text('null', encoding='utf-8')
-        with patch.object(admin, 'fetch_accounts') as upstream:
-            for slot in admin.ADMIN_SLOTS:
-                self.assertEqual(self.request(slot, 'accounts')[0], 503)
-            upstream.assert_not_called()
+    def test_site_security_is_reserved_for_primary(self):
+        with patch.object(admin, 'security_snapshot') as snapshot:
+            self.assertEqual(self.request('secondary', 'security')[0], 403)
+            self.assertEqual(self.request('secondary', 'security/block', {})[0], 403)
+            snapshot.assert_not_called()
 
 
 if __name__ == '__main__':

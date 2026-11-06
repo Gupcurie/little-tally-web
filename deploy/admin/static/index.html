@@ -15,7 +15,7 @@
       <span class="dot"></span>
       <img class="admin-mars-mark" src="/icon-192.png" alt="火星演唱会标志"><h1>拆弹专家 · 账号管理</h1>
     </div>
-    <div class="top-actions"><button id="reload-top" class="primary-refresh" type="button">刷新全部账号</button><button id="assignments-open" class="ghost" type="button" hidden>账号分配</button><button id="security-open" class="ghost" type="button" hidden>网络安全</button><button id="logout" class="ghost" type="button">退出</button></div>
+    <div class="top-actions"><button id="reload-top" class="primary-refresh" type="button">刷新全部账号</button><button id="security-open" class="ghost" type="button" hidden>网络安全</button><button id="logout" class="ghost" type="button">退出</button></div>
   </header>
 
   <p id="admin-position" class="muted small"></p>
@@ -49,20 +49,13 @@
     <p class="muted small">相加相减同时显示放蛋、销售和库存，分别计算并复制。下拉框选择优先显示的账本；同名物品按累计数量合并。</p>
     <p id="sel-info" class="muted small">未选择账号 · 勾选后可汇总或相减，按勾选顺序，首个账号减其余账号</p>
 
-    <p class="muted small account-order-hint">置顶账号优先，同组按最后保存时间从新到旧排列。置顶保存在当前浏览器。</p>
+    <p class="muted small account-order-hint">置顶账号优先，同组按最后保存时间从新到旧排列。置顶和筛选按管理员保存在当前浏览器。</p>
     <div class="table-head">
       <span>用户名</span><span>状态</span><span>物品 / 记录</span><span>保存与同步</span><span>操作</span>
     </div>
     <div id="rows" class="rows"></div>
   </section>
 
-  <div id="assignments-panel" class="modal" hidden>
-    <div class="modal-box">
-      <div class="modal-head"><h2>已分给管理员 2</h2><button id="assignments-close" class="ghost" type="button">关闭</button></div>
-      <p class="muted small">在账号或群卡片上点「分给管理员 2」。需要改回时在这里收回。</p>
-      <div id="assigned-list"></div>
-    </div>
-  </div>
   <div id="security-panel" class="modal" hidden><div class="modal-box"><div class="modal-head"><h2>网络安全</h2><div class="top-actions"><button id="security-refresh" class="ghost">刷新安全记录</button><button id="security-close" class="ghost">关闭</button></div></div><div id="security-body"></div></div></div>
   <section class="panel">
     <h2>最近操作</h2>
@@ -112,6 +105,6 @@
   </div>
 </div>
 
-<script src="/admin/static/app.js?v=admin-book-totals" defer></script>
+<script src="/admin/static/app.js?v=admin-shared-accounts" defer></script>
 </body>
 </html>

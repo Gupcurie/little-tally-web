@@ -15,7 +15,6 @@ import json
 import os
 import re
 import secrets
-import tempfile
 import threading
 import time
 import urllib.error
@@ -42,7 +41,6 @@ LOGIN_MAX_FAILS = 8
 _lock = threading.Lock()
 _fails = {}
 _audit_lock = threading.Lock()
-_assignment_lock = threading.Lock()
 
 NEW_PASSWORD_ALPHABET = 'abcdefghijkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789'
 BOOK_LABELS = {'sales': '销售', 'stock': '库存', 'egg': '放蛋'}
@@ -175,46 +173,6 @@ def read_audit(limit=60, admin_slot=None):
             if len(out) == limit:
                 break
     return out
-
-
-def assigned_accounts():
-    try:
-        with open(os.path.join(DATA_DIR, 'admin-assignments.json'), encoding='utf-8') as file:
-            ids = json.load(file)
-    except FileNotFoundError:
-        return set()
-    if not isinstance(ids, list) or any(not isinstance(id_, str) or not ACCOUNT_ID.fullmatch(id_) for id_ in ids):
-        raise ValueError('Invalid admin assignments')
-    return set(ids)
-
-
-def owns_account(admin_slot, account_id, assigned):
-    owner = 'secondary' if account_id in assigned else 'primary'
-    return admin_slot == owner
-
-
-def set_account_assignment(account_id, assigned_to_secondary):
-    destination = os.path.join(DATA_DIR, 'admin-assignments.json')
-    with _assignment_lock:
-        ids = assigned_accounts()
-        if assigned_to_secondary:
-            ids.add(account_id)
-        else:
-            ids.discard(account_id)
-        with tempfile.NamedTemporaryFile(mode='w', dir=DATA_DIR, encoding='utf-8', delete=False) as file:
-            path = file.name
-            try:
-                json.dump(sorted(ids), file)
-                file.flush()
-                os.fsync(file.fileno())
-            except BaseException:
-                os.unlink(path)
-                raise
-        try:
-            os.replace(path, destination)
-        finally:
-            if os.path.exists(path):
-                os.unlink(path)
 
 
 def ledger_stats(payload):
@@ -597,22 +555,6 @@ class Handler(BaseHTTPRequestHandler):
         token = self.headers.get('X-CSRF') or ''
         return bool(token) and hmac.compare_digest(token, claims.get('csrf', ''))
 
-    def _assignment_snapshot(self):
-        try:
-            return assigned_accounts()
-        except (OSError, ValueError):
-            self._json(503, {'error': '账号分配暂时无法读取'})
-            return None
-
-    def _check_scope(self, admin_slot, account_ids):
-        assigned = self._assignment_snapshot()
-        if assigned is None:
-            return False
-        if not all(owns_account(admin_slot, id_, assigned) for id_ in account_ids):
-            self._json(404, {'error': '账号不在当前管理员的管理范围内'})
-            return False
-        return True
-
     def _check_primary(self, admin_slot):
         if admin_slot == 'primary':
             return True
@@ -688,23 +630,12 @@ class Handler(BaseHTTPRequestHandler):
             return
 
         admin_slot = claims['admin_slot']
-        if path in ('/api/accounts', '/api/assignments'):
-            if path == '/api/assignments' and not self._check_primary(admin_slot):
-                return
-            assigned = self._assignment_snapshot()
-            if assigned is None:
-                return
+        if path == '/api/accounts':
             try:
-                accounts = fetch_accounts() if admin_slot == 'primary' or assigned else []
+                accounts = fetch_accounts()
             except Exception:
                 self._json(503, {'error': 'BACKEND_UNAVAILABLE'})
                 return
-            if path == '/api/assignments':
-                self._json(200, {'accounts': [
-                    {'id': a['id'], 'username': a['username']} for a in accounts if a['id'] in assigned
-                ]})
-                return
-            accounts = [a for a in accounts if owns_account(admin_slot, a['id'], assigned)]
             active = [a for a in accounts if not a['banned_until']]
             self._json(200, {
                 'accounts': accounts,
@@ -725,8 +656,6 @@ class Handler(BaseHTTPRequestHandler):
         match = re.match(r'^/api/accounts/([0-9a-fA-F-]{36})/recommendation$', path)
         if match:
             user_id = match.group(1).lower()
-            if not self._check_scope(admin_slot, [user_id]):
-                return
             try:
                 row = fetch_ledgers([user_id]).get(user_id)
                 status, rows = 200, [row] if row else []
@@ -746,8 +675,7 @@ class Handler(BaseHTTPRequestHandler):
         match = re.match(r'^/api/accounts/([0-9a-fA-F-]{36})/export$', path)
         if match:
             user_id = match.group(1).lower()
-            if self._check_scope(admin_slot, [user_id]):
-                self._export(user_id, (query.get('format') or ['csv'])[0], admin_slot)
+            self._export(user_id, (query.get('format') or ['csv'])[0], admin_slot)
             return
 
         if path == '/api/security':
@@ -791,29 +719,6 @@ class Handler(BaseHTTPRequestHandler):
         if path == '/api/logout':
             audit('logout', ip=client_ip(self), admin_slot=admin_slot)
             self._expire_cookies()
-            return
-
-        if path == '/api/assignments':
-            if not self._check_primary(admin_slot):
-                return
-            body = self._body()
-            user_id = body.get('id') if isinstance(body, dict) else None
-            move = body.get('assigned') if isinstance(body, dict) else None
-            if not isinstance(user_id, str) or not ACCOUNT_ID.fullmatch(user_id) or type(move) is not bool:
-                self._json(400, {'error': '分配请求无效'})
-                return
-            try:
-                target = next((a for a in fetch_accounts() if a['id'] == user_id), None)
-                if target is None:
-                    self._json(404, {'error': '账号不存在'})
-                    return
-                set_account_assignment(user_id, move)
-            except (OSError, ValueError, RuntimeError):
-                self._json(503, {'error': '账号分配失败，请刷新后重试'})
-                return
-            audit('assign_account' if move else 'reclaim_account', user_id, target['username'],
-                  client_ip(self), admin_slot=admin_slot)
-            self._json(200, {'ok': True})
             return
 
         if path == '/api/security/block':
@@ -862,8 +767,6 @@ class Handler(BaseHTTPRequestHandler):
             if op == 'diff' and len(ids) < 2:
                 self._json(400, {'error': 'DIFF_NEEDS_AT_LEAST_TWO'})
                 return
-            if not self._check_scope(admin_slot, ids):
-                return
             try:
                 accounts = fetch_accounts()
             except Exception:
@@ -892,8 +795,6 @@ class Handler(BaseHTTPRequestHandler):
             return
 
         user_id, action = match.group(1).lower(), match.group(2)
-        if not self._check_scope(admin_slot, [user_id]):
-            return
         if any(t['id'] == user_id for t in fetch_teams()):
             self._json(400, {'error': '群账本没有登录密码或个人账号封禁设置'})
             return
