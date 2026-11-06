@@ -29,21 +29,30 @@ dialog{border:1px solid var(--line);border-radius:24px 24px 0 0;max-height:88dvh
 /* One viewport, with remaining space given to the cards. */
 body.count-screen,body.egg-screen{height:100dvh;overflow:hidden}
 .count-screen .app-shell,.egg-screen .app-shell{height:100dvh;min-height:0;display:flex;flex-direction:column;overflow:hidden;max-width:1200px;margin:auto;border:0;border-radius:0}
-.count-screen .app-header{flex:none;min-height:55px;padding:8px 15px;padding-top:max(8px,env(safe-area-inset-top))}.count-screen .brand-mark{width:32px;height:32px;border-radius:9px}.count-screen .brand span{font-size:18px}.count-screen .brand small{font-size:8px}.count-screen .app-header .icon-button{width:36px;height:36px}
+.count-screen .app-header{display:none}
 .count-screen main,.egg-screen main{flex:1;min-height:0;display:flex;padding:0 12px 8px;height:auto}
 .count-screen .bottom-nav,.egg-screen .bottom-nav{position:relative;left:auto;bottom:auto;transform:none;flex:none;width:100%;max-width:none}
-.count-dashboard{display:flex;flex-direction:column;gap:8px;min-height:0;min-width:0;width:100%}.count-dashboard>.book-switch{flex:none;margin:0;padding:3px}.count-dashboard>.book-switch button{min-height:34px;font-size:12px;padding:5px}
-.count-dashboard>.mode-banner{flex:none;margin:0;padding:2px 9px;font-size:10px}.count-dashboard>.mode-banner button{min-height:24px}
-.count-dashboard>.hero{flex:none;margin:0;min-height:69px;padding:10px 15px;border-radius:16px;display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:center;gap:2px 10px}
-.count-dashboard .hero-top{display:block;min-width:0}.count-dashboard .hero h1{font-size:13px;margin-bottom:2px}.count-dashboard .hero .date{font-size:10px}.count-dashboard .hero-top>.badge{display:none}
-.count-dashboard .hero-total{grid-column:2;grid-row:1/3;font-size:36px;line-height:1;margin:0;text-align:right;max-width:none;letter-spacing:-.04em}.count-dashboard .hero-total.long{font-size:24px}.count-dashboard .hero-total small{font-size:11px}
-.count-dashboard .hero-bottom{font-size:10px;justify-content:flex-start;gap:10px}.count-dashboard .hero-bottom .today{font-size:10px;padding:0}.count-dashboard>.soft-message{margin:0;flex:none;padding:6px 10px;max-height:64px;overflow:auto;font-size:10px}.count-dashboard .goal-chips{margin-top:3px}.count-dashboard .goal-chips span{font-size:10px;padding:2px 4px}
-.count-dashboard>.count-heading{flex:none;margin:0;min-height:28px}.count-heading h2{font-size:13px}.count-tools{display:flex;gap:5px}.count-tools .small-button{min-height:30px;font-size:11px;padding:0 8px}.count-tools .icon{width:14px;height:14px}
-.count-dashboard>.item-grid{flex:1;min-height:0;grid-template-columns:repeat(var(--item-columns,3),minmax(0,1fr));grid-template-rows:repeat(var(--item-rows,3),minmax(0,1fr));gap:8px;align-content:stretch}
-.count-dashboard>.item-grid-scroll{overflow-y:auto;grid-template-rows:repeat(var(--item-rows,3),minmax(105px,1fr));overscroll-behavior-y:contain}
-.count-dashboard .item-card{display:flex;flex-direction:column;min-height:0;padding:9px;gap:3px;overflow:hidden;border-radius:15px;container-type:inline-size}
-.count-dashboard .item-name{flex:none;min-height:20px;font-size:clamp(11px,10cqw,14px);gap:4px}.count-dashboard .item-name .dot{width:5px;height:5px}.count-dashboard .item-name .name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.count-dashboard .item-number{flex:1;min-height:22px;padding:0;font-size:clamp(22px,27cqw,42px)}.count-dashboard .item-number.long{font-size:clamp(13px,14cqw,24px)}
-.count-dashboard .stepper{flex:none;gap:6px}.count-dashboard .stepper button{min-height:40px;height:40px}.count-dashboard .item-parts{flex:none;font-size:9px;margin:0;line-height:1.3}.count-save{display:flex;flex:none;align-items:center;gap:4px;color:var(--muted);font-size:10px;margin:0;min-height:19px}.count-save .icon{width:12px;height:12px}.count-tip{margin-left:auto;font-size:9px}
+.count-screen main{padding:max(6px,env(safe-area-inset-top)) 8px 4px}
+.count-dashboard{display:flex;flex-direction:column;gap:5px;min-height:0;min-width:0;width:100%}
+.count-summary{display:flex;flex:none;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:2px 8px;min-height:42px;padding:0 4px 0 8px;background:var(--mint);border-radius:12px}
+.count-summary h1{display:flex;align-items:baseline;gap:7px;flex-wrap:wrap;font-size:13px;line-height:1.2;margin:0;color:var(--ink)}
+.count-summary strong{font-size:26px;font-variant-numeric:tabular-nums;color:var(--green);letter-spacing:-.03em;white-space:nowrap}
+.count-summary strong.long{font-size:18px}
+.count-summary small{font-size:11px;margin-left:4px;font-weight:550}
+.count-summary .count-scope{min-width:0;max-width:52%;min-height:40px;padding:0 5px;font-size:11px;white-space:nowrap}
+.count-scope span{min-width:0;overflow:hidden;text-overflow:ellipsis}
+.count-scope .icon{width:12px;height:12px;flex:none}
+.count-dashboard>.soft-message{margin:0;flex:none;padding:6px 10px;max-height:64px;overflow:auto;font-size:10px}.count-dashboard .goal-chips{margin-top:3px}.count-dashboard .goal-chips span{font-size:10px;padding:2px 4px}
+.count-empty{padding:16px 0;text-align:center}
+.count-dashboard>.item-grid{--item-min-row:108px;flex:1;min-height:0;grid-template-columns:repeat(var(--item-columns,3),minmax(0,1fr));grid-template-rows:repeat(var(--item-rows,3),minmax(0,1fr));gap:5px;align-content:stretch}
+.count-sales>.item-grid{--item-min-row:94px}
+.count-dashboard>.item-grid-scroll{overflow-y:auto;grid-template-rows:repeat(var(--item-rows,3),minmax(var(--item-min-row),1fr));overscroll-behavior-y:contain}
+.count-dashboard .item-card{display:flex;flex-direction:column;min-height:0;padding:5px;gap:2px;overflow:hidden;border-radius:12px;container-type:inline-size}
+.count-dashboard .item-name{flex:none;min-height:18px;font-size:clamp(11px,10cqw,14px);gap:4px}.count-dashboard .item-name .dot{width:5px;height:5px}.count-dashboard .item-name .name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.count-dashboard .item-number{flex:1;min-height:16px;padding:0;font-size:clamp(21px,25cqw,38px);line-height:1;white-space:nowrap}.count-dashboard .item-number.long{font-size:clamp(11px,12cqw,23px)}
+.count-dashboard .stepper{flex:none;grid-template-columns:1fr 1.25fr;gap:4px}.count-dashboard .stepper button{min-height:44px;height:44px}
+.count-dashboard .item-parts{flex:none;font-size:9px;margin:0;line-height:1.3;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.count-save{display:flex;flex:none;align-items:center;gap:4px;color:var(--muted);font-size:10px;margin:0;min-height:14px}.count-save .icon{width:12px;height:12px}
 /* Egg page: counts, recommendation, cards. Secondary actions live in the operation sheet. */
 .egg-screen .app-header{display:none}.egg-screen main{padding:6px 10px 7px;padding-top:max(6px,env(safe-area-inset-top))}
 .egg-wrap{width:100%;min-width:0;min-height:0;display:flex;flex-direction:column;gap:7px;height:100%}
@@ -73,7 +82,7 @@ body.count-screen,body.egg-screen{height:100dvh;overflow:hidden}
 @container egg (max-width:120px){.egg-round{display:none}}
 @media(min-width:700px){main{padding-left:30px;padding-right:30px}.app-header{padding-left:30px;padding-right:30px}.panel{padding:24px}.metric-grid{gap:14px}.metric-grid>div{padding:22px}.bottom-nav{border:1px solid var(--line);bottom:14px;border-radius:18px;width:min(calc(100% - 40px),880px);box-shadow:var(--shadow)}.count-screen .bottom-nav,.egg-screen .bottom-nav{bottom:auto;border-left:0;border-right:0;border-bottom:0;border-radius:0;box-shadow:none}.egg-card{padding:10px;border-radius:16px}.egg-grid{gap:9px}.egg-statusbar{min-height:42px}.egg-reco{min-height:56px}.egg-name{font-size:14px}dialog{bottom:16px;border-radius:23px;padding-bottom:24px}}
 @media(max-width:380px){main{padding-left:16px;padding-right:16px}.app-header{padding-left:17px;padding-right:17px}.panel{padding:16px;border-radius:17px}.page-title{font-size:25px}.metric-grid{gap:7px}.metric-grid>div{padding:13px 10px}.metric-grid strong{font-size:24px}.egg-screen main{padding-left:7px;padding-right:7px}.egg-status{gap:9px;font-size:11px}.egg-status strong{font-size:17px}.egg-mark{width:26px;height:26px}.egg-tools{padding:6px 8px}.egg-reco strong{font-size:15px}.egg-reco-main{gap:6px}.egg-reco-actions{gap:5px}.egg-reco .ghost{padding:5px 7px}.egg-card{padding:5px}.egg-grid{gap:5px}}
-@media(max-height:680px){.count-screen .app-header{min-height:45px;padding-top:max(5px,env(safe-area-inset-top));padding-bottom:5px}.count-dashboard{gap:5px}.count-dashboard>.hero{min-height:51px;padding:6px 12px}.count-dashboard .hero-total{font-size:30px}.count-dashboard .hero-bottom{display:none}.count-dashboard .hero-total{grid-row:1}.count-dashboard .stepper button{min-height:36px;height:36px}.count-dashboard .item-parts,.count-tip{display:none}.count-screen .bottom-nav,.egg-screen .bottom-nav{padding-top:5px;padding-bottom:calc(5px + env(safe-area-inset-bottom))}.bottom-nav button{min-height:42px}.egg-wrap{gap:5px}.egg-statusbar{min-height:32px}.egg-reco{min-height:45px;padding:4px 8px 4px 11px}.egg-add-main,.egg-reco .ghost{min-height:36px;height:36px}.egg-status strong{font-size:17px}}
+@media(max-height:680px){.count-screen .bottom-nav,.egg-screen .bottom-nav{padding-top:5px;padding-bottom:calc(5px + env(safe-area-inset-bottom))}.bottom-nav button{min-height:42px}.egg-wrap{gap:5px}.egg-statusbar{min-height:32px}.egg-reco{min-height:45px;padding:4px 8px 4px 11px}.egg-add-main,.egg-reco .ghost{min-height:36px;height:36px}.egg-status strong{font-size:17px}}
 @media(prefers-reduced-motion:reduce){*,*:before,*:after{transition:none!important;scroll-behavior:auto!important}}
 
 .egg-grid-tight .egg-card{padding:4px;gap:2px;border-radius:10px}.egg-grid-tight .egg-open{min-height:22px}.egg-grid-tight .egg-count{font-size:20px}.egg-grid-tight .egg-minus,.egg-grid-tight .egg-plus{height:38px}.egg-grid-tight .egg-pair{gap:4px}
@@ -148,19 +157,25 @@ button.egg-reco-main{align-self:stretch;text-align:left;background:transparent;c
 .binding-row>label{display:flex;flex-direction:column;gap:5px;min-width:0;font-size:11px;color:var(--muted)}
 .binding-row .field-select{min-width:0;width:100%;font-size:12px;padding:10px 8px}
 
-.count-topbar{display:flex;align-items:center;gap:7px;flex:none;min-width:0}
-.count-topbar>.book-switch{flex:1;min-width:0;flex-wrap:nowrap;margin:0;padding:3px}
-.count-topbar>.book-switch button{min-height:34px;padding:5px;font-size:12px}
-.count-topbar .book-switch .icon{width:14px;height:14px;margin-right:3px}
-.count-copy{flex:none;min-height:38px;padding:7px 9px;font-size:11px;white-space:nowrap}
-.count-copy .icon{width:13px;height:13px;margin-right:3px}
+.count-topbar{display:flex;align-items:center;gap:5px;flex:none;min-width:0;flex-wrap:wrap}
+.count-topbar>.book-switch{flex:1 0 100px;min-width:0;flex-wrap:nowrap;margin:0;padding:2px}
+.count-topbar>.book-switch button{min-height:34px;padding:4px;font-size:12px}
+.count-topbar>.small-button{min-height:38px;padding:0 8px;font-size:11px;white-space:nowrap}
+.count-copy .icon{width:13px;height:13px}
 .count-dashboard .item-card.sales-flash{border-color:var(--green);background:#ffe3eb;box-shadow:inset 0 0 0 2px var(--green)}
 .sales-copy-text{height:260px;padding:14px;font-size:12px;line-height:1.8;resize:vertical}
 
 .egg-manager-row{display:flex;align-items:center;gap:8px;padding:12px 0;border-bottom:1px solid var(--line,#eadce1)}
 .egg-manager-row>div{flex:1;min-width:0;overflow-wrap:anywhere}.egg-manager-row small{display:block;margin-top:4px;color:var(--muted);font-size:12px}.egg-manager-row>button{flex:none;white-space:nowrap}
 
-.workspace-bar{display:flex;justify-content:space-between;align-items:center;gap:8px;font-size:12px;margin-bottom:8px}.workspace-bar:empty{display:none}.count-topbar{flex-wrap:wrap}.bundle-panel{padding:12px;border:2px solid #d92f4b;border-radius:14px;margin-bottom:10px;background:#fff}.bundle-slots{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:5px;margin:10px 0}.bundle-slots button{min-height:54px;border:1px dashed #daa8b3;border-radius:8px;background:#fff4f5;font-size:11px;overflow-wrap:anywhere}.purchase-group{border:2px solid var(--group-color);border-radius:12px;padding:6px;margin:12px 0}.purchase-group header{font-size:12px;color:var(--group-color);padding:5px}.stats-hour-slider{display:flex;gap:12px;align-items:center;margin:12px 0;font-size:13px}.stats-hour-slider input{flex:1;min-width:80px}.stacked-chart{border-bottom:1px solid #c8adb5}.inherit-check{display:inline-flex;gap:6px;margin:10px}.egg-header-actions{gap:4px}.egg-header-actions .small-button{font-size:11px;padding:7px 8px}
+.workspace-bar{display:flex;justify-content:space-between;align-items:center;gap:8px;font-size:12px;margin-bottom:8px}.workspace-bar:empty{display:none}.bundle-panel{flex:none;padding:5px 7px;border:1px solid var(--line);border-radius:10px;background:#fff;font-size:12px;display:grid;gap:4px}
+.bundle-panel>header{display:flex;justify-content:space-between;align-items:center;gap:5px}
+.bundle-slots{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:4px}
+.bundle-slots button{min-height:25px;padding:0 3px;border:1px dashed #daa8b3;border-radius:6px;background:#fff4f5;font-size:11px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.bundle-slots button:disabled{opacity:.65}
+.bundle-panel .button-pair{display:flex;margin:0;gap:4px}
+.bundle-panel .button-pair button{min-height:32px;padding:0 6px;white-space:nowrap;font-size:11px}
+.purchase-group{border:2px solid var(--group-color);border-radius:12px;padding:6px;margin:12px 0}.purchase-group header{font-size:12px;color:var(--group-color);padding:5px}.stats-hour-slider{display:flex;gap:12px;align-items:center;margin:12px 0;font-size:13px}.stats-hour-slider input{flex:1;min-width:80px}.stacked-chart{border-bottom:1px solid #c8adb5}.inherit-check{display:inline-flex;gap:6px;margin:10px}.egg-header-actions{gap:4px}.egg-header-actions .small-button{font-size:11px;padding:7px 8px}
 
 .period-options{max-height:220px;overflow:auto;border:1px solid #eadce1;border-radius:10px;padding:8px}.period-options label{display:flex;align-items:center;gap:8px;font-size:12px;margin:10px 0}
 

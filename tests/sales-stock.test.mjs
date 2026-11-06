@@ -154,7 +154,7 @@ test('sales copy uses current card quantities across dates instead of operation 
 test('count screens label their own copy report and only sales highlights the latest recorded item',()=>{
  const {state,sale}=fixture();C.addItem(state.sales,'乙');C.setCount(state.sales,sale,1);
  C.setCount(state.sales,state.sales.items[1].id,1);state.sales.records.at(-1).at-=86400000;
- const ctx=vm.createContext({C,state:{book:'sales'},book:()=>state.sales,fmt:String,e:String,localMode:false,icon:()=>'',title:String,
+ const ctx=vm.createContext({C,state:{book:'sales',books:{sales:true,stock:true}},ledger:{},workspaceLabel:()=>'',book:()=>state.sales,fmt:String,e:String,localMode:false,icon:()=>'',
   color:()=>'',goalBanner:()=>'',empty:()=>'',timeBadge:()=>''});
  vm.runInContext(source.slice(source.indexOf('function countView('),source.indexOf('function goalBanner(')),ctx);
  const salesMarkup=ctx.countView();assert.match(salesMarkup,/data-action="copy-count-report"/);assert.equal((salesMarkup.match(/sales-flash/g)||[]).length,1);

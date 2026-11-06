@@ -35,8 +35,11 @@ const eggMode=()=>enabledBooks().length===1&&state.books.egg;
 let TABS=loadTabs();
 function book(){return ledger.state[state.book];}
 function toast(text){const node=document.querySelector('#toast');node.textContent=text;node.classList.add('show');clearTimeout(toastTimer);toastTimer=setTimeout(()=>node.classList.remove('show'),3600);}
-function timeBadge(){return ledger.savedAt?`${localMode?'本机已保存':'云端已保存'} ${C.clock(ledger.savedAt)}`:localMode?'自动保存到本机':'登录后自动保存到云端';}
+function timeBadge(showTime=true){return ledger.savedAt?`${localMode?'本机已保存':'云端已保存'}${showTime?' '+C.clock(ledger.savedAt):''}`:localMode?'自动保存到本机':'登录后自动保存到云端';}
 function render(){
+ const previousGrid=main.querySelector('.count-dashboard .item-grid');
+ const previousScroll=previousGrid?.scrollTop||0;
+ const previousScope=previousGrid?.closest('.count-dashboard').dataset.scope;
  document.body.classList.toggle('login-screen',!localMode&&(!ledger.signedIn||ledger.loading));
  document.body.classList.toggle('count-screen',(localMode||ledger.signedIn)&&!ledger.loading&&!ledger.readOnly&&state.page==='count'&&!state.itemID);
  document.body.classList.toggle('egg-screen',(localMode||ledger.signedIn)&&!ledger.loading&&!ledger.readOnly&&state.page==='egg'&&!state.eggItemID);
@@ -51,8 +54,11 @@ function render(){
   try{main.innerHTML=({count:countView,egg:eggView,history:historyView,stats:statsViewNew,ratio:ratioView,settings:settingsView}[state.page]||countView)();}
   catch(err){state.eggItemID=null;state.page='count';main.innerHTML=countView();toast('这个页面刚刚没打开，已回到记数页。');}
  }
- if((localMode||ledger.signedIn)&&!ledger.loading){const scope=document.createElement('div');scope.className='workspace-bar';scope.innerHTML=workspaceBar();if(state.page==='settings')main.insertAdjacentHTML('afterbegin',daySettingsView());main.prepend(scope);}
- layoutVars();fitItemGrid();fitEggGrid();animateEggRecommendation();refreshEggPlan();queueEggPlanSync();
+ if((localMode||ledger.signedIn)&&!ledger.loading){const scope=document.createElement('div');scope.className='workspace-bar';scope.innerHTML=workspaceBar();if(state.page==='settings')main.insertAdjacentHTML('afterbegin',daySettingsView());if(!main.firstElementChild?.classList.contains('count-dashboard'))main.prepend(scope);}
+ layoutVars();fitItemGrid();
+ const currentDashboard=main.querySelector('.count-dashboard');
+ if(previousScroll&&currentDashboard?.dataset.scope===previousScope){const grid=currentDashboard.querySelector('.item-grid');if(grid)grid.scrollTop=previousScroll;}
+ fitEggGrid();animateEggRecommendation();refreshEggPlan();queueEggPlanSync();
 }
 function animateEggRecommendation(){
  const box=main.querySelector('.egg-reco');
@@ -67,15 +73,17 @@ function animateEggRecommendation(){
 function fitItemGrid(){
  const grid=main.querySelector('.count-dashboard .item-grid');if(!grid)return;
  const count=grid.children.length,{width,height}=grid.getBoundingClientRect();if(!width||!height)return;
- const gap=parseFloat(getComputedStyle(grid).gap)||8,minWidth=94,minHeight=matchMedia('(max-height:650px)').matches?94:108,maxColumns=Math.max(1,Math.min(6,Math.floor((width+gap)/(minWidth+gap))));
+ const style=getComputedStyle(grid),gap=parseFloat(style.rowGap)||0,minWidth=94,minHeight=parseFloat(style.getPropertyValue('--item-min-row'));
+ const maxColumns=Math.max(1,Math.min(6,Math.floor((width+gap)/(minWidth+gap))));
  let best=null;
  for(let columns=1;columns<=maxColumns;columns++){
   const rows=Math.ceil(count/columns),w=(width-gap*(columns-1))/columns,h=(height-gap*(rows-1))/rows;
-  const score=Math.min(w/130,h/140)-((rows*columns-count)/Math.max(1,count))*.12;
-  if(!best||score>best.score)best={columns,rows,score};
+  const overflow=Math.max(0,rows*minHeight+(rows-1)*gap-height);
+  const score=Math.min(w/130,h/140)-((rows*columns-count)/count)*.12;
+  if(!best||overflow<best.overflow||(overflow===best.overflow&&score>best.score))best={columns,rows,overflow,score};
  }
  grid.style.setProperty('--item-columns',best.columns);grid.style.setProperty('--item-rows',best.rows);
- grid.classList.toggle('item-grid-scroll',(height-gap*(best.rows-1))/best.rows<minHeight);
+ grid.classList.toggle('item-grid-scroll',best.overflow>0);
 }
 function layoutVars(){
  const height=Math.round(nav.getBoundingClientRect().height);
@@ -87,14 +95,19 @@ function loginView(){const registering=state.authMode==='register';return `<sect
 function pageHeading(eyebrow,name,subtitle){return `<h1 class="page-title">${e(name)}</h1>${subtitle?`<p class="page-subtitle">${e(subtitle)}</p>`:''}`;}
 function empty(name='这里还没有记录',hint='添加物品后开始记录。'){return `<div class="empty">${icon('leaf')}<strong>${name}</strong><p>${hint}</p></div>`;}
 function countView(){
- const b=book(),c=C.counts(b),total=C.sum(Object.values(c)),today=C.sum(C.todayRecords(b).map(r=>r.delta));
- const lastSaleId=state.book==='sales'?b.records.reduce((last,r)=>!last||r.at>=last.at?r:last,null)?.itemId:null;
- const date=new Intl.DateTimeFormat('zh-CN',{timeZone:C.ZONE,month:'long',day:'numeric',weekday:'long'}).format(Date.now());
- return `<section class="count-dashboard">${state.bundle?bundleView():''}<div class="count-topbar"><div class="book-switch" aria-label="选择账本">${['sales','stock'].map(k=>`<button class="${state.book===k?'active':''}" data-action="book" data-book="${k}">${icon(k==='sales'?'count':'stock')}${title(k)}</button>`).join('')}</div><button class="small-button count-copy" data-action="copy-count-report">${icon('copy')}${state.book==='sales'?'复制销售':'复制库存'}</button>${state.book==='sales'?'<button class="small-button" data-action="bundle-start">多蛋购买</button>':''}</div>
- ${localMode?'<div class="mode-banner">本机体验模式 · 记录仅在当前设备 <button data-action="cloud-mode">登录云端版 →</button></div>':''}<section class="hero" aria-label="账本合计"><div class="hero-top"><div><h1>${state.book==='sales'?'销售总数':'库存总数'}</h1><span class="date">${date} · 北京时间</span></div><span class="badge">${localMode?'本机体验':'云端账户'}</span></div><svg class="hero-art" viewBox="0 0 108 108" fill="none" aria-hidden="true"><path d="M37 28v52m17-52v52m17-52v52M23 71l63-29" stroke="#d92f4b" stroke-width="5" stroke-linecap="round"/></svg><div class="hero-total ${String(total).length>7?'long':''}" data-testid="total">${fmt(total)}<small>件</small></div><div class="hero-bottom"><span>${b.items.length} 类物品 · 累计数量</span><span class="today">今日 ${today>=0?'+':''}${fmt(today)}</span></div></section>
- ${goalBanner(b)}<div class="heading-row count-heading"><h2>我的物品 <span class="muted" style="font-size:11px;font-weight:400;margin-left:5px">${String(b.items.length).padStart(2,'0')}</span></h2><div class="count-tools"><button class="small-button" data-action="add-item">${icon('plus')}添加</button><button class="small-button" data-action="manage">${icon('settings')}管理</button></div></div>
- ${b.items.length?`<div class="item-grid">${b.items.map(i=>`<article class="item-card${i.id===lastSaleId?' sales-flash':''}"><button class="item-name" data-action="detail" data-id="${e(i.id)}"><span class="dot" style="background:${color(i)}"></span><span class="name">${e(i.name)}</span>${icon('arrow')}</button><button class="item-number ${String(c[i.id]).length>6?'long':''}" data-action="edit-count" data-id="${e(i.id)}" aria-label="修改${e(i.name)}数量">${fmt(c[i.id])}</button>${state.book==='stock'&&Object.keys(i.breakdown).length?`<div class="item-parts">${Object.entries(i.breakdown).map(([k,v])=>`${e(k)} ${fmt(v)}`).join(' · ')}</div>`:''}<div class="stepper"><button class="minus" data-action="decrease" data-id="${e(i.id)}" aria-label="${e(i.name)}减一" ${c[i.id]===0?'disabled':''}>${icon('minus')}</button><button class="plus" data-action="increase" data-id="${e(i.id)}" aria-label="${e(i.name)}加一">${icon('plus')}</button></div></article>`).join('')}</div>`:empty('还没有物品','添加第一件物品，开始记录吧。')}
- <p class="count-save green" role="status">${icon('check')}<span>${e(timeBadge())}</span><span class="count-tip">点数字改数 · 点名称查看</span></p></section>`;
+ const books=['sales','stock'].filter(k=>state.books[k]);
+ if(books.length&&!books.includes(state.book))state.book=books[0];
+ const b=book(),c=C.counts(b),total=C.sum(Object.values(c)),sales=state.book==='sales';
+ const lastSaleId=sales?b.records.reduce((last,r)=>!last||r.at>=last.at?r:last,null)?.itemId:null;
+ const scope=JSON.stringify([ledger.user?.id,ledger.workspace?.id,state.book]),scopeLabel=workspaceLabel();
+ const totalText=fmt(total);
+ return `<section class="count-dashboard ${sales?'count-sales':'count-stock'}" data-scope="${e(scope)}">
+ <header class="count-summary"><h1>${sales?'销售总数':'库存总数'} <strong class="${totalText.length>8?'long':''}" data-testid="total">${totalText}<small>件</small></strong></h1>
+ ${localMode?'<button class="small-button count-scope" data-action="cloud-mode">本机体验 · 登录</button>':`<button class="small-button count-scope" data-action="workspace-select" aria-label="${e(scopeLabel)}，切换账本或组队"><span title="${e(scopeLabel)}">${e(scopeLabel)}</span>${icon('arrow')}</button>`}</header>
+ ${state.bundle?bundleView():`<div class="count-topbar">${books.length>1?`<div class="book-switch" aria-label="选择账本">${books.map(k=>`<button class="${state.book===k?'active':''}" data-action="book" data-book="${k}" aria-pressed="${state.book===k}">${k==='sales'?'销售':'库存'}</button>`).join('')}</div>`:''}<button class="small-button count-copy" data-action="copy-count-report">${icon('copy')}${sales?'复制销售':'复制库存'}</button>${sales?'<button class="small-button" data-action="bundle-start">多蛋购买</button>':''}<button class="small-button" data-action="manage" aria-label="管理物品">管理</button></div>`}
+ ${goalBanner(b)}
+ ${b.items.length?`<div class="item-grid">${b.items.map(i=>`<article class="item-card${i.id===lastSaleId?' sales-flash':''}"><button class="item-name" data-action="detail" data-id="${e(i.id)}"><span class="dot" style="background:${color(i)}"></span><span class="name">${e(i.name)}</span>${icon('arrow')}</button><button class="item-number ${String(c[i.id]).length>6?'long':''}" data-action="edit-count" data-id="${e(i.id)}" aria-label="修改${e(i.name)}数量">${fmt(c[i.id])}</button>${state.book==='stock'&&Object.keys(i.breakdown).length?`<div class="item-parts">${Object.entries(i.breakdown).map(([k,v])=>`${e(k)} ${fmt(v)}`).join(' · ')}</div>`:''}<div class="stepper"><button class="minus" data-action="decrease" data-id="${e(i.id)}" aria-label="${e(i.name)}减一" ${c[i.id]===0?'disabled':''}>${icon('minus')}</button><button class="plus" data-action="increase" data-id="${e(i.id)}" aria-label="${e(i.name)}加一">${icon('plus')}</button></div></article>`).join('')}</div>`:`<div class="count-empty"><button class="small-button" data-action="add-item">${icon('plus')}添加物品</button></div>`}
+ <p class="count-save green" role="status">${icon('check')}<span>${e(timeBadge(false))}</span></p></section>`;
 }
 function goalBanner(b){if(!b.goal)return '';try{const p=C.ratioPlan(b,b.goal);return `<div class="soft-message"><b>${p.added===0?'✓ 固定目标已达标':'◎ 固定目标 · 还需补充'}</b><div class="goal-chips">${b.items.filter(i=>p.additions[i.id]>0).map(i=>`<span>${e(i.name)} +${fmt(p.additions[i.id])}</span>`).join('')}${p.other>0?`<span>其他物品合计 +${fmt(p.other)}</span>`:''}</div></div>`;}catch{return '<div class="soft-message warn">固定目标需要调整，请到比例页查看。</div>';}}
 function recordLine(r,selectable=false){const i=book().items.find(i=>i.id===r.itemId);return `<div class="record-wrap"><div class="row">${selectable&&state.selecting?`<input class="record-check" type="checkbox" data-record="${e(r.id)}" aria-label="选择${e(i?.name)}这条记录" ${state.selection.has(r.id)?'checked':''}>`:`<span class="record-symbol ${r.delta<0?'negative':''}">${icon(r.delta>=0?'plus':'minus')}</span>`}<div class="row-main"><div class="row-title">${e(i?.name||'物品')}</div><div class="row-meta">${e(C.clock(r.at))}${r.kind==='set'?' · 手动改数':''}${r.bindingId?(state.book==='stock'?' · 销售联动':' · 已联动库存'):''}</div></div><span class="row-number ${r.delta<0?'red':'green'}">${r.delta>0?'+':''}${fmt(r.delta)}</span>${!state.selecting?`<button class="delete-small" data-action="delete-record" data-id="${e(r.id)}" aria-label="删除${e(i?.name)}这条记录">${icon('trash')}</button>`:''}</div></div>`;}
@@ -478,11 +491,12 @@ async function copyCountReport(){
  catch{showSheet('复制'+label,`<textarea class="field-input count-copy-text" rows="12" readonly aria-label="${label}">${e(text)}</textarea><p class="hint">自动复制未成功，可长按内容全选并复制。</p><button class="primary-button" type="button" data-action="close-sheet">完成</button>`);requestAnimationFrame(()=>{const field=sheetContent.querySelector('.count-copy-text');field?.focus();field?.select();});}
 }
 function installHelp(){const isIOS=/iPad|iPhone|iPod/.test(navigator.userAgent);showSheet('把拆弹专家放进口袋',`<p>添加到主屏幕后，就能像 App 一样从图标打开。</p><ol class="install-steps"><li>${isIOS?'请用 Safari 打开这个网页。':'在手机浏览器中打开这个网页。'}</li><li>${isIOS?'点击浏览器的“分享”按钮。':'打开浏览器菜单，选择“安装应用”或“添加到主屏幕”。'}</li><li>${isIOS?'选择“添加到主屏幕”，如有“作为网页 App 打开”请开启。':'确认名称为“拆弹专家”，完成添加。'}</li></ol><div class="soft-message">建议先添加再正式记数，并固定使用同一个入口。如果已有记录，请先在设置里导出备份，再在主屏幕版导入。</div><button class="primary-button" type="button" data-action="close-sheet">知道了</button>`);}
+function workspaceLabel(){return ledger.workspace?'群：'+ledger.workspace.name:'个人：'+(ledger.user?.username||'我的账号');}
 function workspaceBar(){
  if(localMode)return '';
- return `<span>${ledger.workspace?'群：'+e(ledger.workspace.name):'个人：'+e(ledger.user?.username||'我的账号')}</span><button class="small-button" data-action="workspace-select">切换 / 组队</button>`;
+ return `<span>${e(workspaceLabel())}</span><button class="small-button" data-action="workspace-select">切换 / 组队</button>`;
 }
-function bundleView(){return `<section class="bundle-panel"><strong>多蛋购买 · ${state.bundle.length}/${state.bundleLimit}</strong><div class="bundle-slots">${Array.from({length:state.bundleLimit},(_,k)=>`<button type="button" data-action="bundle-remove" data-index="${k}">${e(book().items.find(i=>i.id===state.bundle[k])?.name||'空位')}</button>`).join('')}</div><p class="hint">点销售物品的加一填入；确认后才一起保存。</p><div class="button-pair"><button class="secondary-button" data-action="bundle-cancel">取消</button><button class="primary-button" data-action="bundle-confirm" ${state.bundle.length===state.bundleLimit?'':'disabled'}>确认这${state.bundleLimit}件</button></div></section>`;}
+function bundleView(){return `<section class="bundle-panel"><header><strong>多蛋购买 · ${state.bundle.length}/${state.bundleLimit}</strong><div class="button-pair"><button class="secondary-button" data-action="bundle-cancel">取消</button><button class="primary-button" data-action="bundle-confirm" ${state.bundle.length===state.bundleLimit?'':'disabled'}>确认这${state.bundleLimit}件</button></div></header><div class="bundle-slots" aria-label="点商品加一填入；确认后一起保存">${Array.from({length:state.bundleLimit},(_,k)=>{const name=book().items.find(i=>i.id===state.bundle[k])?.name;return `<button type="button" data-action="bundle-remove" data-index="${k}" title="${e(name||'空位')}" ${name?`aria-label="移除${e(name)}"`:'disabled'}>${e(name||'空位')}</button>`;}).join('')}</div></section>`;}
 function daySettingsView(){return `<section class="panel"><h2>日期与分段</h2><label>日历 <input type="date" class="field-input" id="calendar-date" value="${C.day(Date.now())}"></label><p class="hint">跨天会继续当前数据。只有主动开启新的一天才结算、归零；历史分段保留。</p><button class="list-button" data-action="day-calendar">查看日期 / 历史分段</button><button class="list-button" data-action="day-open">开启新的一天 / 选择继承</button></section>`;}
 async function periodList(){if(localMode)return ledger.state.periodArchives||[];return ledger.listPeriods();}
 async function openDaySheet(){
@@ -582,7 +596,7 @@ async function action(a,node){
   node.disabled=true;try{await mutate(b=>C.change(b,id,a==='increase'?1:-1));}finally{if(node.isConnected)node.disabled=false;}return;
  }
  if(a==='add-item'){showSheet('添加物品','<label class="field-label" for="name">物品名称</label><input class="field-input" id="name" name="name" maxlength="40" placeholder="例如：帆布袋" autocomplete="off">',async fd=>{await mutate(b=>C.addItem(b,String(fd.get('name'))));return true;});return;}
- if(a==='manage'){showSheet('管理我的物品',`<div>${book().items.map(i=>`<div class="manage-item"><strong>${e(i.name)}</strong><button type="button" class="small-button" data-action="rename-item" data-id="${e(i.id)}" aria-label="重命名${e(i.name)}">${icon('edit')}</button><button type="button" class="small-button red" data-action="delete-item" data-id="${e(i.id)}" aria-label="删除${e(i.name)}">${icon('trash')}</button></div>`).join('')}</div><p class="hint">物品只属于当前${title(state.book)}账本。</p><button type="button" class="primary-button" style="margin-top:20px" data-action="close-sheet">完成</button>`);return;}
+ if(a==='manage'){showSheet('管理我的物品',`<button type="button" class="list-button" data-action="add-item">${icon('plus')}<span>添加物品</span>${icon('arrow','chevron')}</button><div>${book().items.map(i=>`<div class="manage-item"><strong>${e(i.name)}</strong><button type="button" class="small-button" data-action="rename-item" data-id="${e(i.id)}" aria-label="重命名${e(i.name)}">${icon('edit')}</button><button type="button" class="small-button red" data-action="delete-item" data-id="${e(i.id)}" aria-label="删除${e(i.name)}">${icon('trash')}</button></div>`).join('')}</div><p class="hint">物品只属于当前${title(state.book)}账本。</p><button type="button" class="primary-button" style="margin-top:20px" data-action="close-sheet">完成</button>`);return;}
  if(a==='rename-item'){const i=book().items.find(i=>i.id===id);showSheet('重命名物品',`<label class="field-label" for="name">物品名称</label><input class="field-input" id="name" name="name" maxlength="40" value="${e(i.name)}">`,async fd=>{await mutate(b=>{b.items.find(i=>i.id===id).name=String(fd.get('name')).trim();});return true;});return;}
  if(a==='delete-item'){const i=book().items.find(i=>i.id===id);confirmSheet(`删除 ${i.name}？`,'会删除这个物品及其全部历史，并取消当前账本的固定目标。请先确认已有备份。',async()=>{await mutate(b=>C.deleteItem(b,id));},'删除物品');return;}
  if(a==='add-part'){showSheet('添加库存分项','<p>例如：未拆、已拆、瑕疵品。新增分项的初始数量为 0。</p><label class="field-label" for="name">分项名称</label><input class="field-input" id="name" name="name" maxlength="20" autocomplete="off">',async fd=>{const name=String(fd.get('name')).trim();const i=book().items.find(i=>i.id===id);if(Object.hasOwn(i.breakdown,name))throw new Error('分项名称已存在。');await mutate(b=>C.setPart(b,id,name,0));return true;});return;}
