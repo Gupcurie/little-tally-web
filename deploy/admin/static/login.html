@@ -14,16 +14,11 @@
   <p class="muted">仅供站点管理员使用。</p>
   <form id="form" method="post" action="/admin/api/login" autocomplete="off">
     <label for="pw">管理口令</label>
-    <input id="pw" name="password" type="password" required minlength="6" autocomplete="current-password" spellcheck="false">
-    <div data-position-code hidden>
-      <label for="position-code">管理员位置口令</label>
-      <input id="position-code" name="position_code" type="password" inputmode="numeric"
-             pattern="[0-9]{4}" maxlength="4" autocomplete="off" data-code-input disabled>
-    </div>
+    <input id="pw" name="password" type="password" required minlength="4" autocomplete="current-password" spellcheck="false">
     <button id="go" type="submit">登录</button>
     <p id="msg" class="msg" role="status"></p>
   </form>
 </main>
-<script src="/admin/static/login.js?v=20261106-position-code" defer></script>
+<script src="/admin/static/login.js?v=20261106-admin-slots" defer></script>
 </body>
 </html>

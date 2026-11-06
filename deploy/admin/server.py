@@ -26,7 +26,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 SUPABASE_URL = os.environ['SUPABASE_URL'].rstrip('/')
 SERVICE_KEY = os.environ['SERVICE_ROLE_KEY']
 PASSWORD_HASH = os.environ['ADMIN_PASSWORD_HASH']
-POSITION_CODE_HASH = os.environ.get('ADMIN_POSITION_CODE_HASH', '')
+SECONDARY_PASSWORD_HASH = os.environ.get('ADMIN_SECONDARY_PASSWORD_HASH', '')
 SESSION_SECRET = os.environ['SESSION_SECRET'].encode()
 DATA_DIR = os.environ.get('DATA_DIR', '/data')
 STATIC_DIR = os.environ.get('STATIC_DIR', '/app/static')
@@ -66,17 +66,17 @@ def verify_password(password, stored):
         return False
 
 
-def verify_login(body):
-    if not isinstance(body, dict):
-        return False
-    password = body.get('password')
-    password_ok = isinstance(password, str) and verify_password(password, PASSWORD_HASH)
-    if not POSITION_CODE_HASH:
-        return password_ok
-    code = body.get('position_code')
-    code_ok = (isinstance(code, str) and re.fullmatch(r'[0-9]{4}', code)
-               and verify_password(code, POSITION_CODE_HASH))
-    return password_ok and bool(code_ok)
+def login_admin_slot(body):
+    if not isinstance(body, dict) or not isinstance(body.get('password'), str):
+        return None
+    password = body['password']
+    primary_ok = verify_password(password, PASSWORD_HASH)
+    secondary_ok = SECONDARY_PASSWORD_HASH and verify_password(password, SECONDARY_PASSWORD_HASH)
+    if primary_ok:
+        return 'primary'
+    if secondary_ok:
+        return 'secondary'
+    return None
 
 
 def make_session():
@@ -494,9 +494,6 @@ class Handler(BaseHTTPRequestHandler):
         except OSError:
             self._json(404, {'error': 'NOT_FOUND'})
             return
-        if name == 'login.html' and POSITION_CODE_HASH:
-            raw = raw.replace(b'data-position-code hidden', b'data-position-code')
-            raw = raw.replace(b'data-code-input disabled', b'data-code-input required')
         self.send_response(200)
         self.send_header('Content-Type', ctype)
         self.send_header('Content-Length', str(len(raw)))
@@ -825,7 +822,8 @@ class Handler(BaseHTTPRequestHandler):
             if len(attempts) >= LOGIN_MAX_FAILS:
                 self._json(429, {'error': 'TOO_MANY_ATTEMPTS'})
                 return
-        if not verify_login(self._body()):
+        admin_slot = login_admin_slot(self._body())
+        if not admin_slot:
             with _lock:
                 _fails.setdefault(ip, []).append(now)
             audit('login', ip=ip, result='failed')
@@ -847,7 +845,7 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header('Content-Length', str(len(raw)))
         self.end_headers()
         self.wfile.write(raw)
-        audit('login', ip=ip)
+        audit('login', ip=ip, note='admin_slot=' + admin_slot)
 
     def _expire_cookies(self):
         self.send_response(200)
