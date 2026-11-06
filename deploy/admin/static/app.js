@@ -6,11 +6,13 @@ let LOADED_ONCE = false, LOADING = false, ACTIVE_DETAIL = null, ACTIVE_EGG_VIEW 
 const ACCOUNT_CHANGES = new Map();
 const SELECTED = new Set();
 const PIN_STORAGE = 'tally-admin-pinned-accounts-v1';
-function readPinnedAccounts(){try{const ids=JSON.parse(localStorage.getItem(PIN_STORAGE)||'[]');return new Set(Array.isArray(ids)?ids.filter(id=>typeof id==='string'&&/^[0-9a-fA-F-]{36}$/.test(id)):[]);}catch{return new Set();}}
-const PINNED = readPinnedAccounts();
+let ADMIN_SLOT = null, assignmentVersion = 0;
+function pinStorageKey(){return ADMIN_SLOT === 'secondary' ? PIN_STORAGE + '-secondary' : PIN_STORAGE;}
+function readPinnedAccounts(){try{const ids=JSON.parse(localStorage.getItem(pinStorageKey())||'[]');return new Set(Array.isArray(ids)?ids.filter(id=>typeof id==='string'&&/^[0-9a-fA-F-]{36}$/.test(id)):[]);}catch{return new Set();}}
+let PINNED = new Set();
 function accountModifiedTime(account){const value=account.ledger_updated_at;if(!value)return 0;const raw=typeof value==='string'&&!/(Z|[+-]\d{2}:?\d{2})$/i.test(value)?value+'Z':value;const time=new Date(raw).getTime();return Number.isFinite(time)?time:0;}
 function compareAccounts(a,b){return Number(PINNED.has(b.id))-Number(PINNED.has(a.id))||accountModifiedTime(b)-accountModifiedTime(a)||(a.username||'').localeCompare(b.username||'','zh-CN')||a.id.localeCompare(b.id);}
-function togglePinnedAccount(id){if(PINNED.has(id))PINNED.delete(id);else PINNED.add(id);let saved=true;try{localStorage.setItem(PIN_STORAGE,JSON.stringify([...PINNED]));}catch{saved=false;}renderRows();if(!saved)flash('置顶已在本页生效，浏览器未能保存，关闭页面后可能失效。');}
+function togglePinnedAccount(id){if(PINNED.has(id))PINNED.delete(id);else PINNED.add(id);let saved=true;try{localStorage.setItem(pinStorageKey(),JSON.stringify([...PINNED]));}catch{saved=false;}renderRows();if(!saved)flash('置顶已在本页生效，浏览器未能保存，关闭页面后可能失效。');}
 const BOOK_LABELS = { sales: '销售账本', stock: '库存账本', egg: '放蛋账本' };
 
 function cookie(name) {
@@ -143,7 +145,9 @@ function renderRows() {
   const rows = $('rows');
   rows.textContent = '';
   if (!list.length) {
-    rows.appendChild(el('p', 'empty muted', ACCOUNTS.length ? '没有匹配的账号' : '还没有账号'));
+    const message = ACCOUNTS.length ? '没有匹配的账号' : (ADMIN_SLOT === 'secondary' ? '管理员 1 尚未分配账号或群' : '还没有账号');
+    rows.appendChild(el('p', 'empty muted', message));
+    updateSelection();
     return;
   }
   for (const account of list) {
@@ -201,6 +205,12 @@ function renderRows() {
     exp.addEventListener('click', () => exportAccount(account, 'csv'));
     actions.appendChild(exp);
 
+    if (ADMIN_SLOT === 'primary') {
+      const assign = el('button', 'ghost small', '分给管理员 2');
+      assign.type = 'button';
+      assign.addEventListener('click', () => changeAssignment(account, true, assign));
+      actions.appendChild(assign);
+    }
     if(account.entity_type!=='team'){
     const toggle = el('button', 'ghost small' + (account.banned_until ? '' : ' warn'), account.banned_until ? '启用' : '禁用');
     toggle.type = 'button';
@@ -512,16 +522,90 @@ function label(action) {
   return ({
     login: '登录', logout: '退出', ban: '禁用账号', unban: '启用账号',
     reset_password: '设置密码', export: '导出记录', aggregate: '汇总计算',
+    assign_account: '分给管理员 2', reclaim_account: '收回管理',
   })[action] || action;
+}
+
+function clearAccountViews() {
+  ACTIVE_DETAIL = null;
+  ACTIVE_EGG_VIEW = null;
+  for (const id of ['detail', 'agg', 'secret']) $(id).hidden = true;
+  for (const id of ['d-body', 'd-actions', 'a-body', 's-pass', 's-who']) $(id).textContent = '';
+}
+
+function setAdminSlot(slot) {
+  if (slot === ADMIN_SLOT) return;
+  ADMIN_SLOT = slot;
+  ACCOUNTS = [];
+  LOADED_ONCE = false;
+  ACCOUNT_CHANGES.clear();
+  SELECTED.clear();
+  PINNED = readPinnedAccounts();
+  clearAccountViews();
+  for (const id of ['assignments-panel', 'security-panel']) $(id).hidden = true;
+  for (const id of ['assigned-list', 'security-body', 'audit']) $(id).textContent = '';
+  $('admin-position').textContent = slot === 'secondary' ? '管理员 2' : '管理员 1';
+  $('assignments-open').hidden = slot !== 'primary';
+  $('security-open').hidden = slot !== 'primary';
+}
+
+async function loadAssignments() {
+  const list = $('assigned-list');
+  list.textContent = '正在读取…';
+  try {
+    const {accounts} = await api('/api/assignments');
+    list.textContent = '';
+    if (!accounts.length) list.appendChild(el('p', 'muted', '还没有分配账号或群。'));
+    for (const account of accounts) {
+      const row = el('div', 'security-row');
+      row.appendChild(el('span', null, account.username));
+      const reclaim = el('button', 'ghost small', '收回');
+      reclaim.type = 'button';
+      reclaim.addEventListener('click', () => changeAssignment(account, false, reclaim));
+      row.appendChild(reclaim);
+      list.appendChild(row);
+    }
+  } catch (error) {
+    list.textContent = '读取分配失败：' + error.message;
+  }
+}
+
+async function changeAssignment(account, assigned, button) {
+  const action = assigned ? '分给管理员 2' : '收回到管理员 1';
+  if (!window.confirm('将「' + account.username + '」' + action + '？')) return;
+  button.disabled = true;
+  try {
+    await api('/api/assignments', {method: 'POST', body: JSON.stringify({id: account.id, assigned})});
+    assignmentVersion++;
+    if (assigned) {
+      ACCOUNTS = ACCOUNTS.filter(item => item.id !== account.id);
+      SELECTED.delete(account.id);
+      ACCOUNT_CHANGES.delete(account.id);
+      clearAccountViews();
+      renderRows();
+    }
+    await load();
+    if (!$('assignments-panel').hidden) await loadAssignments();
+    flash(assigned ? '已分配给管理员 2' : '已收回到管理员 1');
+  } catch (error) {
+    showError(error.message);
+  } finally {
+    button.disabled = false;
+  }
 }
 
 async function load(options = {}) {
   if (LOADING) return false;
   LOADING = true;let received = false;
+  const requestedVersion = assignmentVersion;
   for (const id of ['reload','reload-top','d-refresh']) $(id).disabled = true;
   showError('');
   try {
-    const data = await api('/api/accounts');received = true;const old = new Map(ACCOUNTS.map(a=>[a.id,a]));
+    const data = await api('/api/accounts');
+    if (requestedVersion !== assignmentVersion) return false;
+    received = true;
+    setAdminSlot(data.admin_slot);
+    const old = new Map(ACCOUNTS.map(a=>[a.id,a]));
     let changed = 0, synced = 0;
     if (LOADED_ONCE) for (const account of data.accounts) {
       const change = accountChange(old.get(account.id), account);
@@ -529,6 +613,7 @@ async function load(options = {}) {
     }
     const first = !LOADED_ONCE;ACCOUNTS = data.accounts;LOADED_ONCE = true;
     const alive = new Set(ACCOUNTS.map(a=>a.id));
+    if ([...old.keys()].some(id => !alive.has(id))) clearAccountViews();
     for (const id of Array.from(SELECTED)) if (!alive.has(id)) SELECTED.delete(id);
     for (const id of ACCOUNT_CHANGES.keys()) if (!alive.has(id)) ACCOUNT_CHANGES.delete(id);
     renderSummary(data.summary, data.generated_at);renderRows();
@@ -545,7 +630,8 @@ async function load(options = {}) {
     return false;
   } finally {
     LOADING = false;for (const id of ['reload','reload-top','d-refresh']) $(id).disabled = false;
-    loadAudit();
+    if (requestedVersion !== assignmentVersion) load();
+    else loadAudit();
   }
 }
 
@@ -573,6 +659,11 @@ async function loadSecurity(){
 }
 async function setIpBlock(ip,blocked){if(!window.confirm((blocked?'封禁':'解除封禁')+' IP '+ip+'？'))return;try{await api('/api/security/block',{method:'POST',body:JSON.stringify({ip,blocked})});flash('已提交，几秒后刷新可查看生效状态。');await loadSecurity();}catch(err){showError(err.message);}}
 $('security-open').addEventListener('click',async()=>{$('security-panel').hidden=!$('security-panel').hidden;if(!$('security-panel').hidden)await loadSecurity();});
+$('assignments-open').addEventListener('click', () => {
+  $('assignments-panel').hidden = false;
+  loadAssignments();
+});
+$('assignments-close').addEventListener('click', () => { $('assignments-panel').hidden = true; });
 $('security-refresh').addEventListener('click',loadSecurity);
 $('security-close').addEventListener('click',()=>{$('security-panel').hidden=true;});
 $('logout').addEventListener('click', async () => {

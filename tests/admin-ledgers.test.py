@@ -1,9 +1,14 @@
 """Focused read-only admin book tests; no live credentials or database writes."""
 import copy
 import csv
+import hashlib
+import hmac
+import json
 import importlib.util
 import io
 import os
+from tempfile import TemporaryDirectory
+import time
 from pathlib import Path
 import unittest
 from unittest.mock import patch
@@ -34,11 +39,15 @@ class Handler:
         self.body = {'book': key, 'op': 'sum', 'ids': [A, B]}
         self.authenticated = authenticated
         self.response = None
+        self.admin_slot = 'primary'
     def _origin_ok(self): return True
-    def _session(self): return {'csrf': 'test'} if self.authenticated else None
+    def _session(self): return {'csrf': 'test', 'admin_slot': self.admin_slot} if self.authenticated else None
     def _csrf_ok(self, claims): return True
     def _body(self): return self.body
     def _json(self, status, data): self.response = (status, data)
+    _assignment_snapshot = admin.Handler._assignment_snapshot
+    _check_scope = admin.Handler._check_scope
+    _check_primary = admin.Handler._check_primary
 
 class AdminBooksTest(unittest.TestCase):
     def test_activity_ignores_recommendation_only_saves_and_detects_real_ledger_edits(self):
@@ -239,6 +248,88 @@ class AdminBooksTest(unittest.TestCase):
         handler = Handler(authenticated=False)
         admin.Handler.do_POST(handler)
         self.assertEqual(handler.response[0], 401)
+
+class AdminScopeTest(unittest.TestCase):
+    def setUp(self):
+        directory = TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        config = patch.object(admin, 'DATA_DIR', directory.name)
+        config.start()
+        self.addCleanup(config.stop)
+        self.accounts = [
+            {'id': A, 'username': '甲', 'banned_until': None, 'revision': 1, 'items': 2, 'records': 3},
+            {'id': B, 'username': '群 · 乙', 'banned_until': None, 'revision': 2, 'items': 4, 'records': 5},
+        ]
+
+    def request(self, slot, path, body=None):
+        handler = Handler()
+        handler.admin_slot = slot
+        handler.path = '/admin/api/' + path
+        if body is None:
+            admin.Handler.do_GET(handler)
+        else:
+            handler.body = body
+            admin.Handler.do_POST(handler)
+        return handler.response
+
+    def test_old_or_tampered_sessions_cannot_become_primary(self):
+        token, _ = admin.make_session('secondary')
+        self.assertEqual(admin.read_session(token)['admin_slot'], 'secondary')
+        body, signature = token.split('.')
+        claims = json.loads(admin.b64d(body))
+        claims['admin_slot'] = 'primary'
+        self.assertIsNone(admin.read_session(admin.b64e(json.dumps(claims).encode()) + '.' + signature))
+        body = admin.b64e(json.dumps({'exp': int(time.time()) + 100, 'csrf': 'legacy'}).encode())
+        signature = hmac.new(admin.SESSION_SECRET, body.encode(), hashlib.sha256).hexdigest()
+        self.assertIsNone(admin.read_session(body + '.' + signature))
+
+    def test_group_assignment_moves_visibility_and_can_be_reclaimed(self):
+        with patch.object(admin, 'fetch_accounts', return_value=self.accounts):
+            self.assertEqual(self.request('secondary', 'accounts')[1]['summary']['total'], 0)
+            self.assertEqual(self.request('secondary', 'assignments', {'id': B, 'assigned': True})[0], 403)
+            self.assertEqual(self.request('primary', 'assignments', {'id': B, 'assigned': True})[0], 200)
+            primary = self.request('primary', 'accounts')[1]
+            secondary = self.request('secondary', 'accounts')[1]
+            self.assertEqual([a['id'] for a in primary['accounts']], [A])
+            self.assertEqual([a['id'] for a in secondary['accounts']], [B])
+            self.assertEqual(primary['summary']['records'], 3)
+            self.assertEqual(secondary['summary']['records'], 5)
+            self.assertEqual(self.request('primary', 'assignments')[1]['accounts'], [{'id': B, 'username': '群 · 乙'}])
+            self.assertEqual(self.request('primary', 'assignments', {'id': B, 'assigned': False})[0], 200)
+            self.assertEqual(self.request('secondary', 'accounts')[1]['accounts'], [])
+
+    def test_cross_scope_paths_deny_before_accessing_supabase(self):
+        admin.set_account_assignment(B, True)
+        with patch.object(admin, 'supabase') as upstream, patch.object(admin, 'fetch_accounts') as fetch:
+            for slot, denied, allowed in [('primary', B, A), ('secondary', A, B)]:
+                for action in ['export', 'recommendation']:
+                    self.assertEqual(self.request(slot, 'accounts/' + denied.upper() + '/' + action)[0], 404)
+                for action in ['ban', 'password']:
+                    self.assertEqual(self.request(slot, 'accounts/' + denied + '/' + action, {})[0], 404)
+                self.assertEqual(self.request(slot, 'aggregate', {'ids': [allowed, denied], 'book': 'egg'})[0], 404)
+            self.assertEqual(self.request('secondary', 'security')[0], 403)
+            self.assertEqual(self.request('secondary', 'security/block', {})[0], 403)
+            upstream.assert_not_called()
+            fetch.assert_not_called()
+
+    def test_authorized_ledger_works_and_audit_is_separate(self):
+        admin.set_account_assignment(B, True)
+        admin.audit('export', A, '原管理员记录', admin_slot='primary')
+        admin.audit('export', B, '新增管理员记录', admin_slot='secondary')
+        with patch.object(admin, 'fetch_ledgers', return_value={B: {'payload': payload()}}):
+            result = self.request('secondary', 'accounts/' + B + '/recommendation')
+        self.assertEqual(result[0], 200)
+        self.assertEqual(result[1]['egg'], payload()['egg'])
+        for slot, title in [('primary', '原管理员记录'), ('secondary', '新增管理员记录')]:
+            self.assertEqual([e['target_name'] for e in self.request(slot, 'audit')[1]['entries']], [title])
+
+    def test_corrupted_assignments_fail_closed_for_both_slots(self):
+        (Path(admin.DATA_DIR) / 'admin-assignments.json').write_text('null', encoding='utf-8')
+        with patch.object(admin, 'fetch_accounts') as upstream:
+            for slot in admin.ADMIN_SLOTS:
+                self.assertEqual(self.request(slot, 'accounts')[0], 503)
+            upstream.assert_not_called()
+
 
 if __name__ == '__main__':
     unittest.main()
