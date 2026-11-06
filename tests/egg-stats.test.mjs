@@ -127,13 +127,14 @@ test('statistics render in day, hour and minute views, including per-item and op
  const {egg}=fixture();
  class FixedDate extends Date{static now(){return NOW;}}
  const context=vm.createContext({C:{...C,eggStatistics:(egg,options)=>C.eggStatistics(egg,{...options,now:NOW})},Date:FixedDate,
-  state:{range:3,statsItem:null,statsGran:'day',selectedHour:null,eggStatsLimit:80},eggBook:()=>egg,fmt:String,e:escape,
+  ledger:{},state:{book:'egg',range:3,statsItem:null,statsGran:'day',selectedHour:null,eggStatsLimit:80},eggBook:()=>egg,fmt:String,e:escape,
   pageHeading:()=>'',bookPicker:()=>'',rangePills:()=>'',legendRow:()=>'',empty:()=>'',icon:()=>''});
  vm.runInContext(extracted('eggStatsView','itemColor'),context);
  for(const gran of ['day','hour','minute']){
   context.state.statsGran=gran;const markup=context.eggStatsView();
   assert.match(markup,/操作明细/);assert.match(markup,/手动改数/);assert.match(markup,/物品数量与本轮进度/);
   assert.match(markup,/第 2 轮 0\/6/);assert.match(markup,/2026/);
+  assert.equal((markup.match(/class="activity-column"/g)||[]).length,{day:30,hour:24,minute:60}[gran]);
  }
 });
 test('recommendation feedback runs once after data or selection changes, respecting reduced motion',()=>{

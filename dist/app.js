@@ -37,6 +37,8 @@ function book(){return ledger.state[state.book];}
 function toast(text){const node=document.querySelector('#toast');node.textContent=text;node.classList.add('show');clearTimeout(toastTimer);toastTimer=setTimeout(()=>node.classList.remove('show'),3600);}
 function timeBadge(showTime=true){return ledger.savedAt?`${localMode?'本机已保存':'云端已保存'}${showTime?' '+C.clock(ledger.savedAt):''}`:localMode?'自动保存到本机':'登录后自动保存到云端';}
 function render(){
+ const previousChart=main.querySelector('.activity-scroll');
+ const previousChartScroll=previousChart?.scrollLeft;
  const previousGrid=main.querySelector('.count-dashboard .item-grid');
  const previousScroll=previousGrid?.scrollTop||0;
  const previousScope=previousGrid?.closest('.count-dashboard').dataset.scope;
@@ -58,6 +60,14 @@ function render(){
  layoutVars();fitItemGrid();
  const currentDashboard=main.querySelector('.count-dashboard');
  if(previousScroll&&currentDashboard?.dataset.scope===previousScope){const grid=currentDashboard.querySelector('.item-grid');if(grid)grid.scrollTop=previousScroll;}
+ const chart=main.querySelector('.activity-scroll');
+ if(chart){
+  if(chart.dataset.chartKey===previousChart?.dataset.chartKey)chart.scrollLeft=previousChartScroll;
+  else{
+   const peak=chart.querySelector('[data-chart-peak]');
+   if(peak)chart.scrollLeft=peak.offsetLeft+(peak.offsetWidth-chart.clientWidth)/2;
+  }
+ }
  fitEggGrid();animateEggRecommendation();refreshEggPlan();queueEggPlanSync();
 }
 function animateEggRecommendation(){
@@ -179,35 +189,64 @@ function eggStatsView(){
  <div class="metric-grid egg-stat-metrics"><div><small>放入</small><strong>${fmt(summary.added)}</strong></div><div><small>减回</small><strong>${fmt(summary.removed)}</strong></div><div><small>净变化</small><strong>${signed(summary.net)}</strong></div><div><small>手改净量</small><strong>${signed(summary.manualNet)}</strong></div><div><small>记录次数</small><strong>${fmt(summary.records)}</strong></div><div><small>活跃物品</small><strong>${data.activeItems}</strong></div></div>
  <section class="panel"><div class="heading-row"><h2 style="margin:0">放蛋时段</h2><div class="book-switch egg-gran-switch">${[['day','按天'],['hour','按小时'],['minute','按分钟']].map(([key,label])=>`<button data-action="stats-gran" data-gran="${key}" class="${gran===key?'active':''}">${label}</button>`).join('')}</div></div>
  ${gran==='minute'?`<label class="egg-hour-select">查看小时 <select class="field-select" data-egg-stats-hour aria-label="查看哪个小时">${Array.from({length:24},(_,h)=>`<option value="${h}" ${h===data.hour?'selected':''}>${String(h).padStart(2,'0')}:00–${String(h).padStart(2,'0')}:59</option>`).join('')}</select></label>`:''}
- ${eggActivityChart(buckets,gran)}
+ ${activityChart(buckets,{gran,hour:data.hour,egg:true})}
  <div class="egg-chart-key"><span><i class="egg-key-add"></i>放入</span><span><i class="egg-key-remove"></i>减回</span></div>
  <p class="hint">${gran==='day'&&state.range===3?'日趋势显示近 30 天；上方指标与下方明细包含全部记录。':gran==='hour'?'点小时柱可查看该小时的 60 分钟。':gran==='minute'?`显示 ${String(data.hour).padStart(2,'0')} 点的 60 分钟。`:''} 手动改数单独计入“手改净量”和明细。</p>${legendRow(egg.items,filter)}</section>
  <section class="panel"><h2>物品数量与本轮进度</h2>${data.items.map(i=>`<div class="egg-stat-item"><div class="rank-title"><button class="egg-stat-name" data-action="stats-filter" data-id="${e(i.id)}">${e(i.name)}</button><strong>累计 ${fmt(i.count)} 个</strong></div><div class="egg-stat-detail">第 ${i.itemRound} 轮 ${i.progress}/${i.ratio} · 放入 ${fmt(i.added)} · 减回 ${fmt(i.removed)} · 手改 ${signed(i.manualNet)}</div><div class="rank-track"><div class="rank-fill" style="width:${Math.min(100,i.progress/i.ratio*100)}%"></div></div>${i.overflow?`<div class="egg-overflow" title="超出 ${i.overflow} 个"><span style="width:${Math.min(100,i.overflow/i.ratio*100)}%"></span></div>`:''}<div class="egg-stat-detail">${i.lastPlacedAt?'最近放入 '+e(C.clock(i.lastPlacedAt,true)):'暂无放入记录'}</div></div>`).join('')||'<p class="hint">还没有物品。</p>'}</section>
  <section class="panel"><div class="heading-row"><h2 style="margin:0">操作明细</h2><span class="inline-caption">${fmt(summary.records)} 条</span></div><p class="hint">净变化 = 放入 − 减回 + 手改净量；时间为北京时间。</p>${data.rows.slice(0,limit).map(r=>{const item=egg.items.find(i=>i.id===r.itemId);return `<div class="record-wrap"><div class="row"><span class="record-symbol ${r.delta<0?'negative':''}">${icon(r.delta<0?'minus':'plus')}</span><div class="row-main"><div class="row-title">${e(item?.name||'物品')}</div><div class="row-meta">${e(C.clock(r.at,true))} · ${r.kind==='set'?'手动改数':r.delta<0?'减回':'放入'}</div></div><span class="row-number ${r.delta<0?'red':'green'}">${signed(r.delta)}</span></div></div>`;}).join('')||empty('所选范围没有记录')}${data.rows.length>limit?`<button class="small-button egg-more-records" data-action="egg-stats-more">再显示 ${Math.min(80,data.rows.length-limit)} 条（已显示 ${limit} 条）</button>`:''}</section>`;
 }
-function eggActivityChart(buckets,gran){
- const positive=Math.max(0,...buckets.map(b=>b.added)),negative=Math.max(0,...buckets.map(b=>b.removed)),span=Math.max(1,positive+negative),zero=positive+negative?positive/span*100:100;
- const label=i=>gran==='day'?buckets[i].label:gran==='minute'?String(i).padStart(2,'0')+'分':i+'点';
- const ticks=[...new Set([0,Math.floor((buckets.length-1)/2),buckets.length-1])];
- return `<div class="chart egg-activity-chart" style="--zero:${zero}%" role="group" aria-label="放蛋${gran==='day'?'每日':gran==='minute'?'每分钟':'每小时'}放入与减回数量">${buckets.map((b,i)=>{const content=`<span class="bar" style="height:${b.added/span*100}%;top:${(positive-b.added)/span*100}%"></span><span class="bar negative" style="height:${b.removed/span*100}%;top:${zero}%"></span>`;const description=`${label(i)}：放入 ${b.added}，减回 ${b.removed}，手改 ${b.manualNet}`;return gran==='hour'?`<button class="bar-column" data-action="stats-hour" data-hour="${i}" aria-label="${e(description)}">${content}</button>`:`<span class="bar-column" title="${e(description)}" aria-label="${e(description)}">${content}</span>`;}).join('')}</div><div class="chart-labels">${ticks.map(i=>`<span>${e(label(i))}</span>`).join('')}</div>`;
+function activityChart(buckets,{gran,hour=null,egg=false}){
+ const maxAdded=Math.max(0,...buckets.map(bucket=>bucket.added));
+ const maxRemoved=Math.max(0,...buckets.map(bucket=>bucket.removed||0));
+ const span=Math.max(1,maxAdded+maxRemoved);
+ const zero=maxAdded||maxRemoved?maxAdded/span*100:100;
+ const unit=egg?'个':'件';
+ const period=gran==='day'?'日期':gran==='minute'?'分钟':'小时';
+ const key=JSON.stringify([ledger.workspace?.id,state.book,state.range,state.statsItem,gran,gran==='minute'?hour:null]);
+ const labels=buckets.map(({added,removed=0})=>!added&&removed?'−'+fmt(removed):fmt(added));
+ const labelWidth=Math.max(...labels.map(label=>label.length),...buckets.map(({added,removed})=>added&&removed?1+fmt(removed).length:0));
+ const bucketWidth=Math.max(gran==='day'?42:24,labelWidth*7+8);
+ const peak=buckets.reduce((best,bucket,i)=>bucket.added+(bucket.removed||0)>buckets[best].added+(buckets[best].removed||0)?i:best,0);
+ const columns=buckets.map((bucket,i)=>{
+  const {added,removed=0,manualNet=0,segments=[]}=bucket;
+  const tick=gran==='day'?bucket.label:String(i).padStart(2,'0');
+  const time=gran==='hour'?tick+':00':gran==='minute'?tick+' 分':tick;
+  const description=egg?`${time}：放入 ${fmt(added)}，减回 ${fmt(removed)}，手改 ${fmt(manualNet)}`:`${time}：增加 ${fmt(added)} ${unit}`;
+  const top=zero-added/span*100;
+  const bars=`${added?`<span class="activity-bar" style="top:${top}%;height:${added/span*100}%">${segments.map(({name,value,color})=>`<span class="activity-segment" style="flex-basis:${value/added*100}%;background:${color}" title="${e(name)} ${fmt(value)}"></span>`).join('')}</span>`:''}
+    ${removed?`<span class="activity-bar negative" style="top:${zero}%;height:${removed/span*100}%"></span>`:''}`;
+  const values=`<span class="activity-value${!added&&removed?' negative':''}" style="top:${top}%">${labels[i]}</span>
+    ${added&&removed?`<span class="activity-value negative activity-value-below" style="top:${zero+removed/span*100}%">−${fmt(removed)}</span>`:''}`;
+  const content=`<span class="activity-track" aria-hidden="true">${bars}${values}</span><span class="activity-tick" aria-hidden="true">${e(tick)}</span>`;
+  const attrs=`class="activity-column" aria-label="${e(description)}" ${i===peak&&(maxAdded||maxRemoved)?'data-chart-peak':''}`;
+  return gran==='hour'
+   ?`<button type="button" ${attrs} data-action="stats-hour" data-hour="${i}">${content}</button>`
+   :`<span ${attrs} role="img" title="${e(description)}">${content}</span>`;
+ }).join('');
+ return `<div class="activity-scroll" data-chart-key="${e(key)}" tabindex="0" role="region" aria-label="按${period}的数量，可左右滑动">
+  <div class="activity-plot" style="--bucket-count:${buckets.length};--bucket-width:${bucketWidth}px;--zero:${zero}%">${columns}</div></div>
+  <p class="hint activity-axis">纵轴：${egg?'放入与减回':'增加'}数量（${unit}） · 横轴：${period} · 时间轴可左右滑动</p>`;
 }
 function itemColor(index){return palette[Math.abs(index)%palette.length];}
 function chartBlock(records,items,{gran='hour',hour=null,filter=null}={}){
- const buckets=gran==='minute'?60:24;
- const series=items.filter(i=>!filter||i.id===filter).map((i,idx)=>({id:i.id,name:i.name,color:itemColor(items.indexOf(i)),values:Array(buckets).fill(0)}));
- const byId=Object.fromEntries(series.map(s=>[s.id,s]));
- for(const r of records){
-  if(r.delta<=0)continue;
-  const s=byId[r.itemId];if(!s)continue;
-  if(gran==='minute'){if(hour===null||C.hour(r.at)!==hour)continue;const m=C.minute(r.at);if(m>=0&&m<60)s.values[m]+=r.delta;}
-  else s.values[C.hour(r.at)]+=r.delta;
+ const buckets=Array.from({length:gran==='minute'?60:24},()=>({added:0,segments:[]}));
+ const totals=Array.from({length:buckets.length},()=>new Map());
+ const byId=new Map(items.map((item,index)=>[item.id,{name:item.name,color:itemColor(index)}]));
+ for(const record of records){
+  if(record.delta<=0||!byId.has(record.itemId)||(filter&&record.itemId!==filter))continue;
+  if(gran==='minute'&&C.hour(record.at)!==hour)continue;
+  const index=gran==='minute'?C.minute(record.at):C.hour(record.at);
+  const values=totals[index];
+  values.set(record.itemId,(values.get(record.itemId)||0)+record.delta);
+  buckets[index].added+=record.delta;
  }
- const max=Math.max(1,...Array.from({length:buckets},(_,k)=>C.sum(series.map(s=>s.values[k]))));
- const label=gran==='minute'?'分':'点';
- return `<div class="stacked-chart" role="group" aria-label="按${gran==='minute'?'分钟':'小时'}的数量">${Array.from({length:buckets},(_,b)=>{
-  const segs=series.filter(s=>s.values[b]>0).map(s=>`<span class="seg" style="height:${(s.values[b]/max*100).toFixed(1)}%;background:${s.color}" title="${e(s.name)} ${s.values[b]}"></span>`).join('');
-  return `<button class="hour-col${hour===b&&gran==='minute'?' on':''}" ${gran==='hour'?`data-action="stats-hour" data-hour="${b}"`:''} aria-label="${b}${label}：${C.sum(series.map(s=>s.values[b]))} 件">${segs}</button>`;
- }).join('')}</div><div class="chart-labels">${(gran==='minute'?[0,15,30,45,59]:[0,6,12,18,23]).map(k=>`<span>${String(k).padStart(2,'0')}${gran==='minute'?'分':':00'}</span>`).join('')}</div><p class="hint">纵轴：数量（件），0–${fmt(max)}；横轴：${gran==='minute'?'分钟':'小时'}</p>`;
+ for(let i=0;i<buckets.length;i++){
+  for(const [id,item] of byId){
+   const value=totals[i].get(id);
+   if(value)buckets[i].segments.push({...item,value});
+  }
+ }
+ return activityChart(buckets,{gran,hour});
 }
 function legendRow(items,filter){
  return `<div class="legend"><button data-action="stats-filter" data-id="" class="${!filter?'on':''}">全部物品</button>${items.map((i,idx)=>`<button data-action="stats-filter" data-id="${e(i.id)}" class="${filter===i.id?'on':''}"><span class="swatch" style="background:${itemColor(idx)}"></span>${e(i.name)}</button>`).join('')}</div>`;
