@@ -158,7 +158,7 @@ test('count screens label their own copy report and only sales highlights the la
   color:()=>'',goalBanner:()=>'',empty:()=>'',timeBadge:()=>''});
  vm.runInContext(source.slice(source.indexOf('function countView('),source.indexOf('function goalBanner(')),ctx);
  const salesMarkup=ctx.countView();assert.match(salesMarkup,/data-action="copy-count-report"/);assert.equal((salesMarkup.match(/sales-flash/g)||[]).length,1);
- assert.match(salesMarkup,new RegExp('class="item-card sales-flash"><button[^>]+data-id="'+sale+'"'));
+ assert.match(salesMarkup,new RegExp('class="item-card sales-flash"[^>]*><button[^>]+data-id="'+sale+'"'));
  ctx.state.book='stock';ctx.book=()=>state.stock;
  const stockMarkup=ctx.countView();assert.match(stockMarkup,/data-action="copy-count-report"/);assert.match(stockMarkup,/复制库存/);assert.doesNotMatch(stockMarkup,/复制销售/);assert.doesNotMatch(stockMarkup,/sales-flash|recommended/);
 });

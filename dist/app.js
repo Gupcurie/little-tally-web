@@ -4,6 +4,7 @@ import {BrowserLedger} from './storage.js';
 import {CloudLedger} from './cloud.js';
 import {cloudConfig} from './cloud-config.js';
 import * as Ops from './operations.js';
+import {installItemDrag} from './reorder.js';
 
 const icons={
  count:'<rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/>',
@@ -19,6 +20,7 @@ const localMode=new URLSearchParams(location.search).get('local')==='1';
 const ledger=localMode?new BrowserLedger():new CloudLedger(cloudConfig);
 let state={page:['count','egg','history','stats','ratio','settings'].includes(location.hash.slice(1))?location.hash.slice(1):'egg',book:'sales',range:0,keyword:'',direction:0,historyLimit:80,selection:new Set(),selecting:false,itemID:null,ratioMode:'parts',ratioSelected:new Set(),ratioValues:Object.create(null),ratioPlan:null,ratioError:null,authMode:'login',baseID:'',selectedHour:null};
 let eggPlanSyncTimer,eggPlanSyncTask=null;
+let itemDrag=null,orderSaving=false,renderedDay=null;
 let toastTimer,formSubmit=null,restoreExpected=null,backupReady=null;
 icons.egg='<path d="M12 3c3.6 0 6.5 4.4 6.5 9.2 0 4.4-2.9 8.3-6.5 8.3S5.5 16.6 5.5 12.2C5.5 7.4 8.4 3 12 3z"/><path d="M9.5 9.5c.6-1.2 1.5-2 2.5-2"/>';
 const TAB_LABELS={count:'记数',egg:'放蛋',history:'历史',stats:'统计',ratio:'比例',settings:'设置'};
@@ -29,7 +31,7 @@ const loadEggMode=()=>{try{const raw=localStorage.getItem('little-tally-egg-mode
 const saveEggMode=value=>{try{localStorage.setItem('little-tally-egg-mode',value?'1':'0');}catch{}};
 const loadBooks=()=>{try{const raw=JSON.parse(localStorage.getItem('little-tally-books')||'null');if(raw&&typeof raw==='object')return {sales:raw.sales!==false,stock:raw.stock!==false,egg:raw.egg!==false};}catch{}return {sales:true,stock:true,egg:true};};
 const saveBooks=books=>{try{localStorage.setItem('little-tally-books',JSON.stringify(books));}catch{}};
-Object.assign(state,{eggPick:null,eggPlan:null,eggMotionKey:null,eggStatsLimit:80,eggOnlyLeft:false,eggItemID:null,eggSelecting:false,eggSelection:new Set(),eggArrange:false,eggDraft:null,eggCols:2,tabDrag:null,books:loadBooks(),statsGran:'hour',statsItem:null});
+Object.assign(state,{eggPick:null,eggPlan:null,eggMotionKey:null,eggStatsLimit:80,eggOnlyLeft:false,eggItemID:null,eggSelecting:false,eggSelection:new Set(),eggDraft:null,eggCols:2,tabDrag:null,books:loadBooks(),statsGran:'hour',statsItem:null});
 const enabledBooks=()=>['sales','stock','egg'].filter(k=>state.books[k]);
 const eggMode=()=>enabledBooks().length===1&&state.books.egg;
 let TABS=loadTabs();
@@ -37,6 +39,8 @@ function book(){return ledger.state[state.book];}
 function toast(text){const node=document.querySelector('#toast');node.textContent=text;node.classList.add('show');clearTimeout(toastTimer);toastTimer=setTimeout(()=>node.classList.remove('show'),3600);}
 function timeBadge(showTime=true){return ledger.savedAt?`${localMode?'本机已保存':'云端已保存'}${showTime?' '+C.clock(ledger.savedAt):''}`:localMode?'自动保存到本机':'登录后自动保存到云端';}
 function render(){
+ if(itemDrag?.active)return;
+ renderedDay=C.day(Date.now());
  const previousChart=main.querySelector('.activity-scroll');
  const previousChartScroll=previousChart?.scrollLeft;
  const previousGrid=main.querySelector('.count-dashboard .item-grid');
@@ -116,7 +120,7 @@ function countView(){
  ${localMode?'<button class="small-button count-scope" data-action="cloud-mode">本机体验 · 登录</button>':`<button class="small-button count-scope" data-action="workspace-select" aria-label="${e(scopeLabel)}，切换账本或组队"><span title="${e(scopeLabel)}">${e(scopeLabel)}</span>${icon('arrow')}</button>`}</header>
  ${state.bundle?bundleView():`<div class="count-topbar">${books.length>1?`<div class="book-switch" aria-label="选择账本">${books.map(k=>`<button class="${state.book===k?'active':''}" data-action="book" data-book="${k}" aria-pressed="${state.book===k}">${k==='sales'?'销售':'库存'}</button>`).join('')}</div>`:''}<button class="small-button count-copy" data-action="copy-count-report">${icon('copy')}${sales?'复制销售':'复制库存'}</button>${sales?'<button class="small-button" data-action="bundle-start">多蛋购买</button>':''}<button class="small-button" data-action="manage" aria-label="管理物品">管理</button></div>`}
  ${goalBanner(b)}
- ${b.items.length?`<div class="item-grid">${b.items.map(i=>`<article class="item-card${i.id===lastSaleId?' sales-flash':''}"><button class="item-name" data-action="detail" data-id="${e(i.id)}"><span class="dot" style="background:${color(i)}"></span><span class="name">${e(i.name)}</span>${icon('arrow')}</button><button class="item-number ${String(c[i.id]).length>6?'long':''}" data-action="edit-count" data-id="${e(i.id)}" aria-label="修改${e(i.name)}数量">${fmt(c[i.id])}</button>${state.book==='stock'&&Object.keys(i.breakdown).length?`<div class="item-parts">${Object.entries(i.breakdown).map(([k,v])=>`${e(k)} ${fmt(v)}`).join(' · ')}</div>`:''}<div class="stepper"><button class="minus" data-action="decrease" data-id="${e(i.id)}" aria-label="${e(i.name)}减一" ${c[i.id]===0?'disabled':''}>${icon('minus')}</button><button class="plus" data-action="increase" data-id="${e(i.id)}" aria-label="${e(i.name)}加一">${icon('plus')}</button></div></article>`).join('')}</div>`:`<div class="count-empty"><button class="small-button" data-action="add-item">${icon('plus')}添加物品</button></div>`}
+ ${b.items.length?`<div class="item-grid">${b.items.map(i=>`<article class="item-card${i.id===lastSaleId?' sales-flash':''}" data-item="${e(i.id)}"><button class="item-name" data-action="detail" data-id="${e(i.id)}"><span class="dot" style="background:${color(i)}"></span><span class="name">${e(i.name)}</span>${icon('arrow')}</button><button class="item-number ${String(c[i.id]).length>6?'long':''}" data-action="edit-count" data-id="${e(i.id)}" aria-label="修改${e(i.name)}数量">${fmt(c[i.id])}</button>${state.book==='stock'&&Object.keys(i.breakdown).length?`<div class="item-parts">${Object.entries(i.breakdown).map(([k,v])=>`${e(k)} ${fmt(v)}`).join(' · ')}</div>`:''}<div class="stepper"><button class="minus" data-action="decrease" data-id="${e(i.id)}" aria-label="${e(i.name)}减一" ${c[i.id]===0?'disabled':''}>${icon('minus')}</button><button class="plus" data-action="increase" data-id="${e(i.id)}" aria-label="${e(i.name)}加一">${icon('plus')}</button></div></article>`).join('')}</div>`:`<div class="count-empty"><button class="small-button" data-action="add-item">${icon('plus')}添加物品</button></div>`}
  <p class="count-save green" role="status">${icon('check')}<span>${e(timeBadge(false))}</span></p></section>`;
 }
 function goalBanner(b){if(!b.goal)return '';try{const p=C.ratioPlan(b,b.goal);return `<div class="soft-message"><b>${p.added===0?'✓ 固定目标已达标':'◎ 固定目标 · 还需补充'}</b><div class="goal-chips">${b.items.filter(i=>p.additions[i.id]>0).map(i=>`<span>${e(i.name)} +${fmt(p.additions[i.id])}</span>`).join('')}${p.other>0?`<span>其他物品合计 +${fmt(p.other)}</span>`:''}</div></div>`;}catch{return '<div class="soft-message warn">固定目标需要调整，请到比例页查看。</div>';}}
@@ -317,12 +321,7 @@ function eggCard(p,egg){
   ${eggProgressBars(p)}
   <div class="egg-foot">
    <span class="egg-timer" data-timer="${e(p.id)}" data-timer-prefix="距上次 ">距上次 ${sinceText(C.eggLastChange(egg,p.id))}</span>
-   ${state.eggArrange?`<span class="egg-move">
-     <button data-action="egg-move" data-id="${e(p.id)}" data-step="-cols" aria-label="上移">▲</button>
-     <button data-action="egg-move" data-id="${e(p.id)}" data-step="-1" aria-label="左移">◀</button>
-     <button data-action="egg-move" data-id="${e(p.id)}" data-step="1" aria-label="右移">▶</button>
-     <button data-action="egg-move" data-id="${e(p.id)}" data-step="cols" aria-label="下移">▼</button>
-   </span>`:`<span class="egg-pair"><button class="egg-minus" data-action="egg-minus" data-id="${e(p.id)}" aria-label="${e(p.name)}减一个">−1</button><button class="egg-plus" data-action="egg-add" data-id="${e(p.id)}" aria-label="${e(p.name)}放一个">+1</button></span>`}
+   <span class="egg-pair"><button class="egg-minus" data-action="egg-minus" data-id="${e(p.id)}" aria-label="${e(p.name)}减一个">−1</button><button class="egg-plus" data-action="egg-add" data-id="${e(p.id)}" aria-label="${e(p.name)}放一个">+1</button></span>
   </div>
  </article>`;
 }
@@ -413,7 +412,7 @@ function eggView(){
  const shown=state.eggOnlyLeft?ids.filter(id=>byId[id].left>0):ids;
  const pickId=eggPickId(egg),pick=pickId?byId[pickId]:null,round=C.eggRound(egg)+1;
  return `<section class="egg-wrap">
-  <div class="egg-statusbar"><img class="egg-mark" src="./icon-192.png" alt="火星演唱会标志"><div class="egg-status"><span data-testid="egg-round">第 <strong>${round}</strong> 轮</span><span data-testid="egg-total">总数 <strong>${fmt(C.eggTotal(egg))}</strong> 个</span></div><div class="egg-header-actions"><button class="small-button egg-copy" data-action="egg-copy-options">一键复制</button><button class="small-button" data-action="egg-totals">查看总数</button><button class="small-button egg-tools" data-action="${state.eggArrange?'egg-arrange':'egg-tools'}">${state.eggArrange?'完成':icon('settings')+'操作'}</button></div></div>
+  <div class="egg-statusbar"><img class="egg-mark" src="./icon-192.png" alt="火星演唱会标志"><div class="egg-status"><span data-testid="egg-round">第 <strong>${round}</strong> 轮</span><span data-testid="egg-total">总数 <strong>${fmt(C.eggTotal(egg))}</strong> 个</span></div><div class="egg-header-actions"><button class="small-button egg-copy" data-action="egg-copy-options">一键复制</button><button class="small-button" data-action="egg-totals">查看总数</button><button class="small-button egg-tools" data-action="egg-tools">${icon('settings')+'操作'}</button></div></div>
   <div class="egg-reco"><button class="egg-reco-main" data-action="egg-plan" aria-label="查看本轮推荐顺序"><span class="eyebrow">${state.eggPick?.alternative?'备选':'推荐'}</span><strong>${pick?e(pick.name):'—'}</strong>${icon('arrow','tiny')}</button><div class="egg-reco-actions">${pick?`<button class="egg-add-main" data-action="egg-add" data-id="${e(pick.id)}">+1</button>`:''}<button class="ghost small" data-action="egg-reroll">换一个</button></div></div>
   <div class="egg-grid" data-columns="${state.eggCols}">${shown.length?shown.map(id=>eggCard(byId[id],egg)).join(''):`<p class="egg-none">没有未放满的物品。<button class="small-button" data-action="egg-only">显示全部</button></p>`}</div>
  </section>`;
@@ -618,8 +617,7 @@ async function action(a,node){
  if(a==='egg-plan-more'){extendEggPlan(eggPlan(eggBook()));showEggPlan();return;}
  if(a==='egg-reroll'){if(!eggReroll(eggBook()))toast('本轮只剩这一项需要放。');render();return;}
  if(a==='egg-only'){state.eggOnlyLeft=!state.eggOnlyLeft;render();return;}
- if(a==='egg-arrange'){state.eggArrange=!state.eggArrange;render();return;}
- if(a==='egg-move'){const id=node.dataset.id,step=node.dataset.step,egg=eggBook(),order=eggOrder(egg),i=order.indexOf(id);const cols=Math.max(1,state.eggCols||1);const delta=step==='cols'?cols:step==='-cols'?-cols:Number(step);const j=i+delta;if(i<0||j<0||j>=order.length){toast('已经到头了。');return;}[order[i],order[j]]=[order[j],order[i]];await mutateEgg(egg=>{egg.order=order;});return;}
+ if(a==='egg-arrange'){toast('长按物品名称或数字，直接拖到想放的位置，松手保存。');return;}
  if(a==='egg-detail'){state.eggItemID=id;state.eggSelecting=false;state.eggSelection.clear();render();window.scrollTo({top:0});return;}
  if(a==='egg-back'){state.eggItemID=null;state.eggSelecting=false;state.eggSelection.clear();render();window.scrollTo({top:0});return;}
  if(a==='egg-select'){state.eggSelecting=!state.eggSelecting;state.eggSelection.clear();render();return;}
@@ -667,17 +665,14 @@ let resizeFrame=0;
 const relayout=()=>{if(resizeFrame)return;resizeFrame=requestAnimationFrame(()=>{resizeFrame=0;layoutVars();fitItemGrid();fitEggGrid();});};
 window.addEventListener('resize',relayout);
 window.addEventListener('orientationchange',relayout);
-document.addEventListener('contextmenu',event=>{if(event.target.closest('.bottom-nav')||event.target.closest('.egg-card'))event.preventDefault();});
-let suppressClick=false,pressTimer=null,pressTarget=null;
+document.addEventListener('contextmenu',event=>{if(event.target.closest('.bottom-nav')||event.target.closest('.egg-card,.count-dashboard .item-name,.count-dashboard .item-number'))event.preventDefault();});
+let suppressClick=false,pressTimer=null;
 document.addEventListener('pointerdown',event=>{
  const tab=event.target.closest('.bottom-nav [data-page]');
- const card=event.target.closest('.egg-card');
- if(!tab&&!card)return;
- pressTarget=tab?'tab':'card';
+ if(!tab)return;
  pressTimer=setTimeout(()=>{
   pressTimer=null;suppressClick=true;
-  if(pressTarget==='card'){if(!state.eggArrange){state.eggArrange=true;render();toast('排列模式：用卡片上的方向键调位置，调完点“完成排列”。');}}
-  else{state.tabDrag=tab.dataset.page;nav.classList.add('reordering');}
+  state.tabDrag=tab.dataset.page;nav.classList.add('reordering');
  },480);
 },{passive:true});
 document.addEventListener('pointerup',()=>{clearTimeout(pressTimer);pressTimer=null;if(state.tabDrag){state.tabDrag=null;nav.classList.remove('reordering');saveTabs(TABS);render();}});
@@ -692,6 +687,32 @@ document.addEventListener('pointermove',event=>{
  TABS.splice(to,0,TABS.splice(from,1)[0]);
  render();
 },{passive:true});
+itemDrag=installItemDrag({
+ root:main,
+ canStart:()=>!ledger.readOnly&&!ledger.saving&&!ledger.loading&&!orderSaving&&!state.bundle,
+ onPreview:()=>{if(state.page==='egg')fitEggGrid();},
+ onCancel:render,
+ onDrop:async({egg,order})=>{
+  orderSaving=true;
+  const key=egg?'egg':state.book;
+  try{
+   clearTimeout(eggPlanSyncTimer);
+   if(eggPlanSyncTask)await eggPlanSyncTask.catch(()=>{});
+   await ledger.commit(snapshot=>{
+    const target=egg?C.ensureEgg(snapshot):snapshot[key];
+    const current=egg?eggOrder(target):target.items.map(item=>item.id);
+    const known=new Set(current),requested=new Set(order);
+    const merged=[...order.filter(id=>known.has(id)),...current.filter(id=>!requested.has(id))];
+    if(egg)target.order=merged;
+    else{
+     const items=new Map(target.items.map(item=>[item.id,item]));
+     target.items=merged.map(id=>items.get(id));
+    }
+   });
+  }catch(error){toast(error.message||'排序保存失败，请重试。');}
+  finally{orderSaving=false;render();}
+ },
+});
 setInterval(()=>{if(!document.hidden&&state.page==='egg'&&ledger.signedIn!==false)eggTick();},1000);
 document.addEventListener('click',event=>{if(suppressClick){suppressClick=false;const node=event.target.closest('[data-action]');if(node){event.preventDefault();event.stopPropagation();return;}}const node=event.target.closest('[data-action]');if(!node)return;if(node.tagName==='BUTTON')event.preventDefault();Promise.resolve(action(node.dataset.action,node)).catch(err=>{if(err.name!=='AbortError'){toast(err.message||'这次操作未完成。');if(ledger.readOnly)render();}});});
 document.addEventListener('submit',async event=>{if(event.target.id!=='account-form')return;event.preventDefault();const form=event.target,button=event.submitter,message=document.querySelector('#account-message'),values=new FormData(form),username=String(values.get('username')||''),password=String(values.get('password')||'');button.disabled=true;message.textContent=state.authMode==='register'?'正在创建账户…':'正在登录…';try{if(state.authMode==='register'){if(password!==values.get('confirm'))throw new Error('两次输入的密码不一致。');await ledger.register(username,password);}else await ledger.login(username,password);}catch(err){if(message.isConnected){message.className='sheet-error';message.textContent=err.message;}}finally{const field=form.querySelector('[name="password"]'),confirm=form.querySelector('[name="confirm"]');if(field)field.value='';if(confirm)confirm.value='';if(button.isConnected)button.disabled=false;}});
@@ -711,6 +732,6 @@ if(localMode&&ledger.channel)ledger.channel.onmessage=()=>{if(!ledger.saving)led
 ledger.onchange=()=>{if(!localMode&&!ledger.signedIn){state.bundle=null;clearTimeout(eggPlanSyncTimer);state.eggPick=null;state.eggPlan=null;if(sheet.open)closeSheet();state.itemID=null;state.selection.clear();state.ratioValues=Object.create(null);state.ratioSelected.clear();state.ratioPlan=null;}render();};
 await ledger.init();render();
 if('serviceWorker'in navigator)navigator.serviceWorker.register('./sw.js').catch(()=>{});
-setInterval(()=>{if(document.visibilityState==='visible'&&!sheet.open&&['count','stats'].includes(state.page))render();},30000);
+setInterval(()=>{if(document.visibilityState==='visible'&&!sheet.open&&['count','stats'].includes(state.page)&&renderedDay!==C.day(Date.now()))render();},30000);
 
-setInterval(async()=>{if(!localMode&&ledger.workspace&&ledger.signedIn&&!ledger.saving&&!ledger.loading&&!sheet.open&&!state.bundle&&document.visibilityState==='visible'){try{await ledger.reload();render();}catch{}}},5000);
+setInterval(async()=>{if(!localMode&&ledger.workspace&&ledger.signedIn&&!ledger.saving&&!ledger.loading&&!sheet.open&&!state.bundle&&!itemDrag?.active&&!orderSaving&&document.visibilityState==='visible'){try{await ledger.reload();}catch{}}},5000);
