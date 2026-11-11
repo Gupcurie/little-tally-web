@@ -6,7 +6,7 @@
 <meta name="robots" content="noindex, nofollow">
 <title>拆弹专家 · 账号管理</title>
 <link rel="icon" type="image/png" href="/icon-192.png">
-<link rel="stylesheet" href="/admin/static/style.css?v=admin-book-totals">
+<link rel="stylesheet" href="/admin/static/style.css?v=reconcile-teams">
 </head>
 <body>
 <div class="wrap">
@@ -42,6 +42,7 @@
         <option value="sales">销售账本</option>
         <option value="egg">放蛋账本</option>
       </select>
+      <button id="btn-compare" class="ghost" type="button" disabled>销售/放蛋对账</button>
       <button id="btn-sum" class="ghost" type="button" disabled>相加汇总</button>
       <button id="btn-diff" class="ghost" type="button" disabled>相减（首个减其余）</button>
       <button id="reload" class="ghost" type="button">刷新</button>
@@ -78,6 +79,13 @@
   </div>
 </div>
 
+<div id="compare-panel" class="modal" hidden><div class="modal-box">
+ <div class="modal-head"><h2>销售与放蛋对账</h2><button id="compare-close" class="ghost" type="button">关闭</button></div>
+ <div class="compare-controls"><label>放蛋账号<select id="compare-egg"></select></label><label>销售账号<select id="compare-sales"></select></label></div>
+ <div class="top-actions"><button id="compare-refresh" class="ghost" type="button">刷新对账</button><button id="compare-start" class="ghost" type="button">从现在重新开始</button></div>
+ <p class="muted small">第一次打开从当前数量开始，同一方向的起点按管理员保存在当前浏览器。</p>
+ <div id="compare-result"></div>
+</div></div>
 <div id="agg" class="modal" hidden>
   <div class="modal-box">
     <div class="modal-head">
@@ -105,6 +113,6 @@
   </div>
 </div>
 
-<script src="/admin/static/app.js?v=admin-equal-permissions" defer></script>
+<script src="/admin/static/app.js?v=reconcile-teams" defer></script>
 </body>
 </html>

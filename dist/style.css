@@ -263,3 +263,30 @@ button.egg-reco-main{align-self:stretch;text-align:left;background:transparent;c
 }
 
 .item-drag-ghost.item-card { display:flex; flex-direction:column; gap:2px; padding:5px; overflow:hidden; }
+
+.count-summary { align-items:center; gap:4px 8px; padding:4px 6px; }
+.count-summary h1 { flex:1 1 110px; min-width:0; }
+.count-scope-actions { display:flex; align-items:center; gap:4px; flex:1 1 190px; min-width:0; max-width:100%; }
+.count-summary .count-scope { flex:1; max-width:none; overflow:hidden; }
+.count-scope-actions .count-scope { min-width:0; flex:1; }
+.count-scope-actions .team-entry { flex:none; font-size:11px; min-height:36px; padding:0 5px; white-space:nowrap; }
+.workspace-bar .count-scope-actions { flex-basis:auto; }
+.count-dashboard .item-name .name { min-width:0; }
+.count-dashboard .item-name .dot,.count-dashboard .item-name .icon { flex:none; }
+.count-save { flex-wrap:wrap; }
+.reconcile-status { flex:none; padding:3px 7px; border:1px solid #c6dfd0; border-radius:7px; background:#eefaf3; color:#267b53; font-size:11px; min-height:26px; }
+.count-save .reconcile-status { margin-left:auto; }
+.reconcile-status.pending { background:#fff5d8; color:#855b13; border-color:#ebd38d; }
+.reconcile-status.error { background:#ffe8ec; color:#a61938; border-color:#e9a0af; }
+.reconcile-scroll { overflow-x:auto; max-width:100%; }
+.reconcile-table { width:100%; border-collapse:collapse; font-size:12px; white-space:nowrap; }
+.reconcile-table th,.reconcile-table td { padding:8px; text-align:right; border-bottom:1px solid #eadce1; }
+.reconcile-table th:first-child { text-align:left; }
+.team-member { display:flex; align-items:center; justify-content:space-between; gap:8px; padding:8px 0; border-bottom:1px solid var(--line); }
+.team-member>span { min-width:0; overflow-wrap:anywhere; }
+.team-member button { flex:none; }
+.team-members { margin-bottom:18px; }
+@media(max-height:420px) {
+ .count-screen main { overflow-y:auto; }
+ .count-dashboard { flex:0 0 auto; min-height:360px; }
+}

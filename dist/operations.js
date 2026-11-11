@@ -1,4 +1,5 @@
 import * as C from './core.js';
+import {startReconciliation} from './reconcile.js';
 export function applyBundle(state,ids){
  if(!Array.isArray(ids)||ids.length<1||ids.length>10)throw Error('每组请选择1至10件物品。');
  const groupId=C.uid(),bytes=new Uint32Array(1);crypto.getRandomValues(bytes);const groupColor=['#d92f4b','#7262b4','#277e78','#aa6330','#397bb2','#a14c85'][bytes[0]%6];
@@ -21,6 +22,7 @@ export function newSegment(current,{inherit=[],books=[],now=Date.now()}={}){
    if(key==='egg')C.eggSetCount(book,target.id,total);else{C.setCount(book,target.id,total);if(key==='stock')target.breakdown=parts;}
   }
  }
+ if(current.reconciliation?.enabled)next.reconciliation=startReconciliation(next.egg,next.sales,now);
  C.validateState(next);C.validateEgg(C.ensureEgg(next));return next;
 }
 export function selectPeriods(periods,start,end){

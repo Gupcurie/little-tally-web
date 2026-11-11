@@ -81,3 +81,18 @@ test('two authenticated staff share the group while personal ledgers and caches 
  assert.ok(fa.caches.some(c=>c.scope.startsWith('team-')));assert.ok(fb.caches.some(c=>c.scope.startsWith('team-')));
  a.channel?.close();b.channel?.close();
 });
+test('revoked group access clears the group view and reloads personal quantities',async()=>{
+ const f=fixture();
+ const ledger=f.make({fetcher:async(url,options)=>url.endsWith('rpc/tally_team_read')
+  ?Response.json({message:'TALLY_TEAM_DENIED'},{status:400}):f.fetcher(url,options)});
+ await ledger.init();
+ const item=ledger.state.sales.items[0].id;
+ await ledger.commit(s=>C.change(s.sales,item,1));
+ ledger.workspace={id:'revoked-team',name:'旧群'};
+ await ledger.reload();
+ assert.equal(ledger.workspace,null);
+ assert.equal(ledger.readOnly,false);
+ assert.equal(C.counts(ledger.state.sales)[item],1);
+ assert.match(ledger.workspaceNotice,/切换回个人/);
+ ledger.channel?.close();
+});

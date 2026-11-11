@@ -246,6 +246,26 @@ class AdminBooksTest(unittest.TestCase):
         admin.Handler.do_POST(handler)
         self.assertEqual(handler.response[0], 401)
 
+class AdminComparisonTest(unittest.TestCase):
+    def test_comparison_is_authenticated_and_preserves_direction(self):
+        handler=Handler(authenticated=False)
+        handler.path='/admin/api/compare'
+        handler.body={'egg_id':A,'sales_id':B}
+        admin.Handler.do_POST(handler)
+        self.assertEqual(handler.response[0],401)
+        handler.authenticated=True
+        placed=payload();sold=payload()
+        sold['sales']=book('另一个销售物品',[7])
+        with patch.object(admin,'fetch_accounts',return_value=[{'id':A,'username':'放蛋人员'},{'id':B,'username':'销售群'}]), \
+             patch.object(admin,'fetch_ledgers',return_value={A:{'payload':placed},B:{'payload':sold}}) as fetch, \
+             patch.object(admin,'audit') as audit:
+            admin.Handler.do_POST(handler)
+        self.assertEqual(handler.response[0],200)
+        self.assertEqual(handler.response[1]['egg'],placed['egg'])
+        self.assertEqual(handler.response[1]['sales'],sold['sales'])
+        fetch.assert_called_once_with([A,B])
+        self.assertEqual(audit.call_args.kwargs['admin_slot'],'primary')
+
 class AdminProfilesTest(unittest.TestCase):
     def setUp(self):
         directory = TemporaryDirectory()

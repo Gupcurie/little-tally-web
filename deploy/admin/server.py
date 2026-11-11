@@ -739,6 +739,37 @@ class Handler(BaseHTTPRequestHandler):
                 self._json(400, {'error': str(exc)})
             return
 
+        if path == '/api/compare':
+            body = self._body()
+            if not isinstance(body, dict):
+                self._json(400, {'error': '请选择放蛋账号和销售账号'})
+                return
+            egg_id, sales_id = body.get('egg_id'), body.get('sales_id')
+            if any(not isinstance(id_, str) or not ACCOUNT_ID.fullmatch(id_) for id_ in (egg_id, sales_id)):
+                self._json(400, {'error': '请选择有效账号'})
+                return
+            try:
+                accounts = {a['id']: a['username'] for a in fetch_accounts()}
+                if egg_id not in accounts or sales_id not in accounts:
+                    self._json(404, {'error': '账号不存在'})
+                    return
+                ledgers = fetch_ledgers(list(dict.fromkeys((egg_id, sales_id))))
+                placed = (ledgers.get(egg_id) or {}).get('payload') or {}
+                sold = (ledgers.get(sales_id) or {}).get('payload') or {}
+            except Exception:
+                self._json(503, {'error': '账本读取失败，请刷新后重试'})
+                return
+            audit('compare', egg_id + ',' + sales_id,
+                  accounts[egg_id] + ' 放蛋 → ' + accounts[sales_id] + ' 销售',
+                  client_ip(self), admin_slot=admin_slot)
+            self._json(200, {
+                'egg': placed.get('egg'), 'sales': sold.get('sales'),
+                'egg_name': accounts[egg_id], 'sales_name': accounts[sales_id],
+                'periods': [placed.get('periodStartedAt'), sold.get('periodStartedAt')],
+                'generated_at': int(time.time() * 1000),
+            })
+            return
+
         if path == '/api/aggregate':
             body = self._body() or {}
             ids = []

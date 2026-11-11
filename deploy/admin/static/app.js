@@ -129,6 +129,7 @@ function updateSelection() {
   const ids = Array.from(SELECTED);
   $('btn-sum').disabled = ids.length < 1;
   $('btn-diff').disabled = ids.length < 2;
+  $('btn-compare').disabled = ids.length !== 2;
   if (!ids.length) {
     $('sel-info').textContent = '未选择账号 · 勾选后可汇总或相减，首个账号减其余账号';
     return;
@@ -447,6 +448,53 @@ async function runAggregate(op) {
   }
 }
 
+let comparing = false;
+const comparisonBaselines = new Map();
+function comparisonStorageKey() {
+ return 'tally-admin-comparison-v1-' + ADMIN_SLOT + '-' + $('compare-egg').value + '-' + $('compare-sales').value;
+}
+function openComparison() {
+ const ids=[...SELECTED];
+ if(ids.length!==2)return;
+ for(const control of ['compare-egg','compare-sales']){
+  $(control).textContent='';
+  for(const id of ids){
+   const account=ACCOUNTS.find(item=>item.id===id);
+   const option=el('option',null,account?.username||id);
+   option.value=id;$(control).appendChild(option);
+  }
+ }
+ $('compare-egg').value=ids[0];$('compare-sales').value=ids[1];
+ $('compare-panel').hidden=false;
+ refreshComparison();
+}
+async function refreshComparison(reset=false) {
+ if(comparing)return;
+ comparing=true;$('compare-refresh').disabled=true;$('compare-start').disabled=true;
+ const eggId=$('compare-egg').value,salesId=$('compare-sales').value;
+ const slot=ADMIN_SLOT,key=comparisonStorageKey();
+ $('compare-result').textContent='正在读取…';
+ try{
+  const data=await api('/api/compare',{method:'POST',body:JSON.stringify({egg_id:eggId,sales_id:salesId})});
+  if(slot!==ADMIN_SLOT||eggId!==$('compare-egg').value||salesId!==$('compare-sales').value)return;
+  const model=await import('/reconcile.js');
+  let saved=comparisonBaselines.get(key);
+  if(!saved)try{saved=JSON.parse(localStorage.getItem(key));}catch{}
+  if(reset||!saved||JSON.stringify(saved.periods)!==JSON.stringify(data.periods)){
+   saved={periods:data.periods,baseline:model.startReconciliation(data.egg,data.sales,data.generated_at)};
+   comparisonBaselines.set(key,saved);
+   try{localStorage.setItem(key,JSON.stringify(saved));}catch{}
+  }
+  const result=model.reconcile(data.egg,data.sales,saved.baseline);
+  const target=$('compare-result');target.textContent='';
+  target.appendChild(el('p',null,data.egg_name+' 的放蛋 → '+data.sales_name+' 的销售'));
+  target.appendChild(el('p','muted small','对账起点 '+fmtDate(saved.baseline.at)+' · 本次读取 '+fmtDate(data.generated_at)));
+  const detail=el('div');detail.innerHTML=model.reconciliationMarkup(result);target.appendChild(detail);
+ }catch(error){$('compare-result').textContent='对账读取失败：'+error.message;}
+ finally{comparing=false;$('compare-refresh').disabled=false;$('compare-start').disabled=false;
+  if(!$('compare-panel').hidden&&slot===ADMIN_SLOT&&(eggId!==$('compare-egg').value||salesId!==$('compare-sales').value))refreshComparison();
+ }
+}
 function aggregateValue(data,row){return data.op==='diff'?row.diff:row.sum;}
 function aggregateText(data,mode='process'){
  const label=BOOK_LABELS[data.book]||data.book,op=data.op==='diff'?'相减':'相加',process=mode==='process';
@@ -520,7 +568,7 @@ async function loadAudit() {
 function label(action) {
   return ({
     login: '登录', logout: '退出', ban: '禁用账号', unban: '启用账号',
-    reset_password: '设置密码', export: '导出记录', aggregate: '汇总计算',
+    reset_password: '设置密码', export: '导出记录', aggregate: '汇总计算', compare: '销售与放蛋对账',
     assign_account: '分给管理员 2', reclaim_account: '收回管理',
   })[action] || action;
 }
@@ -528,7 +576,7 @@ function label(action) {
 function clearAccountViews() {
   ACTIVE_DETAIL = null;
   ACTIVE_EGG_VIEW = null;
-  for (const id of ['detail', 'agg', 'secret']) $(id).hidden = true;
+  for (const id of ['detail', 'agg', 'secret', 'compare-panel']) $(id).hidden = true;
   for (const id of ['d-body', 'd-actions', 'a-body', 's-pass', 's-who']) $(id).textContent = '';
 }
 
@@ -608,6 +656,11 @@ $('book').addEventListener('change', saveFilters);
 $('reload').addEventListener('click', load);
 $('reload-top').addEventListener('click', load);
 $('d-refresh').addEventListener('click', () => load({forceDetail:true}));
+$('btn-compare').addEventListener('click',openComparison);
+$('compare-refresh').addEventListener('click',()=>refreshComparison());
+$('compare-start').addEventListener('click',()=>{if(window.confirm('以这两个账本的当前数量为起点，重新开始对账？'))refreshComparison(true);});
+$('compare-close').addEventListener('click',()=>{$('compare-panel').hidden=true;});
+for(const id of ['compare-egg','compare-sales'])$(id).addEventListener('change',()=>refreshComparison());
 $('btn-sum').addEventListener('click', () => runAggregate('sum'));
 $('btn-diff').addEventListener('click', () => runAggregate('diff'));
 $('sel-all').addEventListener('change', (event) => {

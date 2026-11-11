@@ -60,7 +60,7 @@ export class CloudLedger {
    const response=await this.fetcher(this.config.url+'/rest/v1/'+path,{method,headers:{apikey:this.config.publishableKey,Authorization:'Bearer '+who.token,'Content-Type':'application/json'},body:body===undefined?undefined:JSON.stringify(body),signal:controller.signal});
    const data=await response.json().catch(()=>null);
    if(who.epoch!==this.epoch||who.user!==this.user?.id)throw new Error('账户已经切换，这次结果不会显示到另一账户。');
-   if(!response.ok){const message=String(data?.message||'云端请求失败。');throw new Error(message.includes('TALLY_TEAM_')?({TALLY_TEAM_CODE_TAKEN:'这个号码今天已被使用，请更换。',TALLY_TEAM_CODE_INVALID:'入群码不存在或已过期。',TALLY_TEAM_RATE:'入群尝试过多，请稍后再试。',TALLY_TEAM_DENIED:'你没有这个群的权限。'}[message.match(/TALLY_TEAM_[A-Z_]+/)?.[0]]||'组队操作未完成。'):message.includes('TALLY_CONFLICT')?'TALLY_CONFLICT':message.includes('TALLY_INVALID')?'云端校验未通过，这次操作没有生效。':response.status===401?'登录已失效，请重新登录。':'云端暂时无法保存，请检查网络后重试。');}
+   if(!response.ok){const message=String(data?.message||'云端请求失败。');const error=new Error(message.includes('TALLY_TEAM_')?({TALLY_TEAM_CODE_TAKEN:'这个号码今天已被使用，请更换。',TALLY_TEAM_CODE_INVALID:'入群码不存在或已过期。',TALLY_TEAM_RATE:'入群尝试过多，请稍后再试。',TALLY_TEAM_DENIED:'你没有这个群的权限。'}[message.match(/TALLY_TEAM_[A-Z_]+/)?.[0]]||'组队操作未完成。'):message.includes('TALLY_CONFLICT')?'TALLY_CONFLICT':message.includes('TALLY_INVALID')?'云端校验未通过，这次操作没有生效。':response.status===401?'登录已失效，请重新登录。':'云端暂时无法保存，请检查网络后重试。');if(message.includes('TALLY_TEAM_DENIED'))error.code='TALLY_TEAM_DENIED';throw error;}
    return teamRead?(data?[data]:[]):data;
   }finally{clearTimeout(timer);}
  }
@@ -76,7 +76,7 @@ export class CloudLedger {
     this.state=initialState();this.cloudRevision=0;this.savedAt=null;
    }
    this.readOnly=false;this.error=null;
-  }catch(err){if(who.epoch===this.epoch){this.readOnly=true;this.error=err.message||'云端记录没有加载成功，原记录不会被空数据覆盖。';}throw err;}
+  }catch(err){if(who.epoch===this.epoch&&this.workspace&&err.code==='TALLY_TEAM_DENIED'){this.workspaceNotice='群访问已结束，已切换回个人账本。';await this.selectWorkspace(null);return;}if(who.epoch===this.epoch){this.readOnly=true;this.error=err.message||'云端记录没有加载成功，原记录不会被空数据覆盖。';}throw err;}
   finally{this.onchange();}
  }
  async saveCache(){
@@ -117,6 +117,9 @@ export class CloudLedger {
  }
  async createTeam(name,code){const empty=newSegment(this.state),payload={format:empty.format,version:1,revision:1,sales:empty.sales,stock:empty.stock,egg:empty.egg,periodStartedAt:empty.periodStartedAt};return this.request('rpc/tally_team_create',{method:'POST',body:{p_name:name,p_code:code,p_snapshot:payload}});}
  async joinTeam(code){const data=await this.request('rpc/tally_team_join',{method:'POST',body:{p_code:code}});if(data?.error)throw Error(data.error==='TALLY_TEAM_RATE'?'入群尝试过多，请10分钟后再试。':'入群码不存在或已过期。');return data;}
+ async teamDetails(){return this.request('rpc/tally_team_details',{method:'POST',body:{p_team_id:this.workspace.id}});}
+ async kickTeamMember(userId){return this.request('rpc/tally_team_kick',{method:'POST',body:{p_team_id:this.workspace.id,p_user_id:userId}});}
+ async dissolveTeam(){await this.request('rpc/tally_team_dissolve',{method:'POST',body:{p_team_id:this.workspace.id}});await this.selectWorkspace(null);}
  async listPeriods(){const rows=await this.request('rpc/tally_periods',{method:'POST',body:{p_team_id:this.workspace?.id||null}});return Array.isArray(rows)?rows:[];}
  async closePeriod(next){
   if(this.saving||this.readOnly)throw Error('请等当前账本可保存后再结算。');this.saving=true;

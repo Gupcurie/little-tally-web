@@ -1,3 +1,4 @@
+import {validReconciliation} from './reconcile.js';
 import {planSeed,planRandom} from './plan-random.js';
 export const MAX = 999999999;
 export const ZONE = 'Asia/Shanghai';
@@ -49,6 +50,7 @@ export function validateBook(book){
 export function validateState(state){
  requireThat(state&&state.format==='little-tally-pocket'&&state.version===1&&Number.isSafeInteger(state.revision)&&state.revision>=0&&state.sales?.book==='sales'&&state.stock?.book==='stock','本机记录格式不正确。');
  validateBook(state.sales);validateBook(state.stock);
+ if(state.reconciliation!==undefined)requireThat(validReconciliation(state.reconciliation),'销售放蛋对账起点数据无效。');
  if(state.salesStockBinding!==undefined){
   const config=state.salesStockBinding;
   requireThat(config&&typeof config.enabled==='boolean'&&config.pairs&&typeof config.pairs==='object'&&!Array.isArray(config.pairs)&&Object.keys(config.pairs).length<=200,'销售库存绑定设置无效。');
