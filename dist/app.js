@@ -663,15 +663,18 @@ function reconciliationStatus(){
 }
 async function queueReconciliationStart(force=false){
  if(ledger.readOnly||ledger.loading||state.page!=='match'&&!dailyRoom()&&(!state.books.sales||!state.books.egg))return;
- const data=dailyComparisonData();if(data.loading||data.loaded&&data.revision===Number(ledger.cloudRevision??ledger.state.revision)&&data.names===matchingNameStamp()&&!force)return;
+ const data=dailyComparisonData();if(data.loading)return data.task;
+ if(data.error&&!force)return;
+ if(data.loaded&&data.revision>=Number(ledger.cloudRevision??ledger.state.revision)&&data.names===matchingNameStamp()&&!force)return;
  if(!localMode&&!ledger.workspace&&ledger.cloudRevision===0&&state.page!=='match')return;
  data.loading=true;data.error=null;const names=matchingNameStamp();
- try{
+ data.task=(async()=>{try{
   if(!localMode&&!ledger.workspace&&ledger.cloudRevision===0){if(eggPlanSyncTask)await eggPlanSyncTask.catch(()=>{});if(ledger.saving){data.loaded=false;return;}if(ledger.cloudRevision===0)await ledger.commit(()=>{});}
   const source=localMode?localMatchingSource():await ledger.matchingRead();if(reconciliationData!==data)return;
-  data.source=source;data.revision=Number(source.revision??ledger.cloudRevision);data.names=names;data.loaded=true;data.version++;
+  data.source=source;data.revision=Number(source.revision??ledger.cloudRevision);data.names=names;data.loaded=true;data.updatedAt=Date.now();data.version++;
  }catch(err){if(reconciliationData===data){data.error=err.message||'今日记录读取失败';data.loaded=true;}}
- finally{data.loading=false;if(reconciliationData===data)render();}
+ finally{data.loading=false;if(reconciliationData===data)render();}})();
+ if(data.loading&&state.page==='match')render();return data.task;
 }
 function ensureMatchingUI(){
  const data=dailyComparisonData(),source=data.source;if(!source)return null;
@@ -689,7 +692,7 @@ function matchingView(){
  const data=dailyComparisonData();if(data.error)return `<h1 class="page-title">匹配比对</h1><p class="sheet-error">读取不完整：${e(data.error)}</p><button class="primary-button" data-action="match-refresh">重新读取</button>`;
  if(!data.source)return '<h1 class="page-title">匹配比对</h1><p class="hint">正在读取两侧物品和今日记录…</p>';
  const ui=ensureMatchingUI(),items=matchingItems(data.source);
- return `<section class="matching-page"><div class="heading-row"><h1 class="page-title">${ui.stage==='setup'?'物品匹配':'今日匹配比对'}</h1><button type="button" class="small-button" data-action="match-refresh">刷新数据</button></div>${ui.error?`<p class="sheet-error" role="alert">${e(ui.error)}</p>`:''}${ui.stage==='setup'?mappingMarkup(items,ui.draft,ui.selection):`<button type="button" class="small-button" data-action="match-edit">修改物品连线</button>${dailyMarkup(reconciliationResult())}`}</section>`;
+ return `<section class="matching-page"><div class="heading-row"><h1 class="page-title">${ui.stage==='setup'?'物品匹配':'今日匹配比对'}</h1><button type="button" class="small-button" data-action="match-refresh" ${data.loading?'disabled aria-busy="true"':''}>${data.loading?'正在刷新…':'刷新数据'}</button></div><p class="hint matching-refresh-status" role="status">${data.loading?'正在读取最新物品名称和今日记录…':data.updatedAt?'刷新完成 · 最近更新 '+new Date(data.updatedAt).toLocaleTimeString('zh-CN',{timeZone:'Asia/Shanghai',hour12:false}):''}</p>${ui.error?`<p class="sheet-error" role="alert">${e(ui.error)}</p>`:''}${ui.stage==='setup'?mappingMarkup(items,ui.draft,ui.selection):`<button type="button" class="small-button" data-action="match-edit">修改物品连线</button>${dailyMarkup(reconciliationResult())}`}</section>`;
 }
 function showReconciliation(){
  if(state.bundle){toast('请先确认或取消这组多蛋购买。');return;}
@@ -700,7 +703,7 @@ async function matchingAction(a,node){
  if(!a.startsWith('match-'))return false;
  const data=dailyComparisonData(),ui=ensureMatchingUI();if(!ui&&a!=='match-refresh')return true;
  if(ui?.saving)return true;
- if(a==='match-refresh'){await queueReconciliationStart(true);return true;}
+ if(a==='match-refresh'){await queueReconciliationStart(true);if(dailyComparisonData()===data)toast(data.error?'刷新失败：'+data.error:'已刷新，当前显示最新物品和今日记录。');return true;}
  if(a==='match-edit'){ui.stage='setup';ui.dirty=false;render();return true;}
  if(a==='match-select'){const set=ui.selection[node.dataset.side];set.has(node.dataset.id)?set.delete(node.dataset.id):set.add(node.dataset.id);render();return true;}
  if(a==='match-connect'||a==='match-solo'){
