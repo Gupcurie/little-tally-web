@@ -736,7 +736,7 @@ async function showTeamDetails(){
  const data=await ledger.teamDetails();
  if(ledger.workspace?.id!==team.id)return;
  const owner=data.owner_id===ledger.user.id,canKick=data.can_kick??owner,daily=Boolean(data.daily_kind);
- showSheet('群：'+team.name,`<p>当前 ${data.members.length} 人</p><div class="team-members">${data.members.map(member=>`<div class="team-member"><span>${e(member.name)}${daily?' · '+(ROLES[member.role]?.name||'成员'):member.user_id===data.owner_id?' · 群主':''}</span>${canKick&&member.user_id!==ledger.user.id?`<button type="button" class="small-button" data-action="team-kick" data-id="${e(member.user_id)}" data-team="${e(team.id)}" data-name="${e(member.name)}">移出群</button>`:''}</div>`).join('')}</div>${owner&&!daily?`<button type="button" class="danger-button" data-action="team-dissolve" data-team="${e(team.id)}">解散群</button>`:''}`);
+ showSheet('群：'+team.name,`<p>当前 ${data.members.length} 人</p><div class="team-members">${data.members.map(member=>`<div class="team-member"><span>${e(member.name)}${daily?' · '+(ROLES[member.role]?.name||'成员'):member.user_id===data.owner_id?' · 群主':''}</span>${canKick&&member.user_id!==ledger.user.id?`<button type="button" class="small-button" data-action="team-kick" data-id="${e(member.user_id)}" data-team="${e(team.id)}" data-name="${e(member.name)}">移出群</button>`:''}</div>`).join('')}</div>${owner&&!daily?`<button type="button" class="danger-button" data-action="team-dissolve" data-team="${e(team.id)}">解散群</button>`:''}<button type="button" class="secondary-button" style="margin-top:12px" data-action="team-leave" data-team="${e(team.id)}">退出该群</button><p class="hint">退出后回到个人账本，群内记录保留。${owner&&!daily?'群主退出时，将自动交接给仍在群里的成员。':''}</p>`);
 }
 function workspaceLabel(){return ledger.workspace?'群：'+ledger.workspace.name:'个人：'+(ledger.user?.username||'我的账号');}
 function workspaceBar(){
@@ -799,6 +799,12 @@ async function action(a,node){
  if(a==='reconcile-open'){showReconciliation();return;}
  if(a==='reconcile-refresh'){await queueReconciliationStart(true);return;}
  if(a==='workspace-details'){await showTeamDetails();return;}
+ if(a==='team-leave'){
+  if(node.dataset.team!==ledger.workspace?.id)throw Error('当前群已切换，请重新打开成员列表。');
+  if(state.bundle)throw Error('请先确认或取消这组多蛋购买，再退出群。');
+  if(!window.confirm('退出当前群并回到个人账本？群内记录会保留，退出后需要重新加入才能访问。'))return;
+  node.disabled=true;try{clearTimeout(eggPlanSyncTimer);if(eggPlanSyncTask)await eggPlanSyncTask.catch(()=>{});await ledger.leaveTeam();resetWorkspaceUI();closeSheet();render();toast('已退出该群，回到个人账本。');}finally{if(node.isConnected)node.disabled=false;}return;
+ }
  if(a==='team-kick'||a==='team-dissolve'){
   if(node.dataset.team!==ledger.workspace?.id)throw Error('当前群已切换，请重新打开成员列表。');
   if(!window.confirm(a==='team-kick'?'将「'+node.dataset.name+'」移出当前群？':'解散当前群？成员将失去群账本访问权限。'))return;

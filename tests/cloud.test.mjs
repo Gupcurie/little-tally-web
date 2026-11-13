@@ -117,6 +117,7 @@ test('two authenticated staff share the group while personal ledgers and caches 
   if(url.endsWith('rpc/tally_teams'))return Response.json(members.has(token)?[group]:[]);
   if(url.endsWith('rpc/tally_team_create')){group={id:C.uid(),name:body.p_name};row={payload:body.p_snapshot,revision:1,updated_at:new Date().toISOString()};members.add(token);return Response.json(group);}
   if(url.endsWith('rpc/tally_team_join')){members.add(token);return Response.json(group);}
+  if(url.endsWith('rpc/tally_team_leave')){members.delete(token);return Response.json({ok:true});}
   if(url.endsWith('rpc/tally_team_read'))return members.has(token)?Response.json(row):Response.json({message:'TALLY_TEAM_DENIED'},{status:403});
   if(url.endsWith('rpc/tally_team_save')){
    if(!members.has(token))return Response.json({message:'TALLY_TEAM_DENIED'},{status:403});
@@ -132,6 +133,7 @@ test('two authenticated staff share the group while personal ledgers and caches 
  const id=a.state.sales.items[0].id;await a.commit(s=>C.change(s.sales,id,1));await assert.rejects(b.commit(s=>C.change(s.sales,id,1)),/更新/);assert.equal(C.total(b.state.sales),1);
  await b.commit(s=>C.change(s.sales,id,1));await a.reload();assert.equal(C.total(a.state.sales),2);
  await a.selectWorkspace(null);await b.selectWorkspace(null);assert.equal(C.total(a.state.sales),5);assert.equal(C.total(b.state.sales),7);
+ await a.selectWorkspace(created);await a.leaveTeam();assert.equal(a.workspace,null);assert.equal(C.total(a.state.sales),5);assert.equal(members.has('Bearer token-a'),false);assert.equal(members.has('Bearer token-b'),true);await b.selectWorkspace(created);assert.equal(C.total(b.state.sales),2);await b.selectWorkspace(null);
  assert.ok(fa.caches.some(c=>c.scope.startsWith('team-')));assert.ok(fb.caches.some(c=>c.scope.startsWith('team-')));
  a.channel?.close();b.channel?.close();
 });

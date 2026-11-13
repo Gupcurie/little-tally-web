@@ -130,6 +130,12 @@ export class CloudLedger {
  async matchingSave(config,signature,hash){return this.request('rpc/tally_matching_save',{method:'POST',body:{p_team_id:this.workspace?.id||null,p_config:config,p_signature:signature,p_expected_hash:hash}});}
  async teamDetails(){return this.request('rpc/tally_team_details',{method:'POST',body:{p_team_id:this.workspace.id}});}
  async kickTeamMember(userId){return this.request('rpc/tally_team_kick',{method:'POST',body:{p_team_id:this.workspace.id,p_user_id:userId}});}
+ async leaveTeam(){
+  if(!this.workspace)return;if(this.saving||this.loading)throw Error('请等当前保存或切换完成后再退出群。');
+  const team=this.workspace.id;this.saving=true;this.onchange();
+  try{await this.request('rpc/tally_team_leave',{method:'POST',body:{p_team_id:team}});}finally{this.saving=false;this.onchange();}
+  if(this.workspace?.id===team)await this.selectWorkspace(null);
+ }
  async dissolveTeam(){await this.request('rpc/tally_team_dissolve',{method:'POST',body:{p_team_id:this.workspace.id}});await this.selectWorkspace(null);}
  async listPeriods(){const rows=await this.request('rpc/tally_periods',{method:'POST',body:{p_team_id:this.workspace?.id||null}});return Array.isArray(rows)?rows:[];}
  async closePeriod(next){

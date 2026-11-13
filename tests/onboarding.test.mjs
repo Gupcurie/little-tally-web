@@ -42,3 +42,9 @@ test('author note preserves role, matching and support guidance without promisin
  for(const text of ['销售功能和库存功能','红娃衣和黑娃衣','手动加减库存','L2385434375','13480041761'])assert.ok(AUTHOR_NOTE.includes(text));
  assert.ok(AUTHOR_NOTE.includes('尽量'));assert.ok(AUTHOR_NOTE.includes('还是可能重复'));assert.ok(!AUTHOR_NOTE.includes('每一件物品前后都不重复'));
 });
+
+test('both job tutorials and the author note contain the requested bug and support wording',()=>{
+ const requested='如果有bug或者软件有问题，或是不会用本工具的可以告知我哦，微信号L2385434375，或者给这个手机号码发短信13480041761。';
+ const text=s=>s.replace(/<[^>]*>/g,'');assert.ok(text(AUTHOR_NOTE).includes(requested));
+ for(const role of ['place','dismantle'])for(const daily of [false,true])assert.ok(text(tutorialFor(role,daily).at(-1).body).includes(requested));
+});
