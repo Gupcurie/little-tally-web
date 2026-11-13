@@ -269,6 +269,17 @@ class AdminComparisonTest(unittest.TestCase):
         self.assertEqual(audit.call_args.kwargs['admin_slot'],'primary')
 
 class DailyComparisonTest(unittest.TestCase):
+    def test_placement_inventory_is_an_independent_optional_admin_book(self):
+        data=payload();data['placementStock']=book('清点物品',[7])
+        stats=admin.ledger_stats(data)
+        self.assertEqual(stats['placementStock']['lines'][0]['total'],7)
+        self.assertEqual(stats['stock']['lines'][0]['total'],8)
+        result=admin.aggregate([A],{A:'大群'},'placementStock','sum',{A:{'payload':data}})
+        self.assertEqual(result['rows'][0]['sum'],7)
+        self.assertIn('投蛋库存',admin.export_csv('大群',data))
+        old=admin.account_activity(data)['data_fingerprint'];data['_dailyRevisions']={'place':9,'dismantle':6}
+        self.assertEqual(admin.account_activity(data)['data_fingerprint'],old)
+
     def test_daily_response_includes_closed_segments_and_only_today_records_in_direction(self):
         stamp=1794628800  # 2026-11-14 12:00 Beijing
         start=stamp*1000-12*3600000

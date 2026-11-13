@@ -14,7 +14,7 @@ let PINNED = new Set();
 function accountModifiedTime(account){const value=account.ledger_updated_at;if(!value)return 0;const raw=typeof value==='string'&&!/(Z|[+-]\d{2}:?\d{2})$/i.test(value)?value+'Z':value;const time=new Date(raw).getTime();return Number.isFinite(time)?time:0;}
 function compareAccounts(a,b){return Number(PINNED.has(b.id))-Number(PINNED.has(a.id))||accountModifiedTime(b)-accountModifiedTime(a)||(a.username||'').localeCompare(b.username||'','zh-CN')||a.id.localeCompare(b.id);}
 function togglePinnedAccount(id){if(PINNED.has(id))PINNED.delete(id);else PINNED.add(id);let saved=true;try{localStorage.setItem(pinStorageKey(),JSON.stringify([...PINNED]));}catch{saved=false;}renderRows();if(!saved)flash('置顶已在本页生效，浏览器未能保存，关闭页面后可能失效。');}
-const BOOK_LABELS = { sales: '销售账本', stock: '库存账本', egg: '放蛋账本' };
+const BOOK_LABELS = { sales: '销售账本', stock: '库存账本', egg: '放蛋账本', placementStock:'投蛋库存清点' };
 
 function cookie(name) {
   for (const part of document.cookie.split(';')) {
@@ -348,6 +348,7 @@ function openDetail(account) {
 
   const books = account.books || {};
   for (const [key, title] of Object.entries(BOOK_LABELS)) {
+    if(key==='placementStock'&&!account.books?.placementStock)continue;
     const book = books[key] || {items: 0, records: 0, lines: []};
     const isEgg = key === 'egg';
     const section = el('section', 'book');
@@ -526,7 +527,7 @@ function aggregateSection(data){
 function renderAllAggregates(data){
  const body=$('a-body');body.textContent='';$('a-title').textContent='多账号'+(data.op==='diff'?'相减':'相加')+'结果';
  const first=$('book').value;
- for(const key of [first,...['egg','sales','stock'].filter(k=>k!==first)])if(data.books[key])body.appendChild(aggregateSection(data.books[key]));
+ for(const key of [first,...['egg','sales','stock','placementStock'].filter(k=>k!==first)])if(data.books[key])body.appendChild(aggregateSection(data.books[key]));
  $('agg').hidden=false;
 }
 function renderAggregate(data){

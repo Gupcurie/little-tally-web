@@ -56,6 +56,13 @@ test('a real API failure is reported as a read failure rather than a page-render
 test('aggregate book picker offers sales, stock and egg',()=>{
  for(const key of ['sales','stock','egg'])assert.match(html,new RegExp('<option value="'+key+'">'));
 });
+test('daily placement stock appears as its own optional detail and aggregate book',async()=>{
+ const nodes=await loadPage();nodes.sourceAccount.books.placementStock={items:1,records:1,lines:[{name:'投蛋清点',total:7}]};
+ vm.runInContext('ACCOUNTS[0].books.placementStock='+JSON.stringify(nodes.sourceAccount.books.placementStock)+';openDetail(ACCOUNTS[0])',nodes.context);
+ assert.match(nodes['d-body'].textContent,/投蛋库存清点/);assert.match(nodes['d-body'].textContent,/总数 7/);assert.match(html,/<option value="placementStock">/);
+ vm.runInContext('renderAggregate('+JSON.stringify({book:'placementStock',op:'sum',users:[{username:'天使'}],rows:[{name:'投蛋清点',values:[7],sum:7}]})+')',nodes.context);
+ assert.match(nodes['a-title'].textContent,/投蛋库存清点/);
+});
 test('account details end each ledger with its total and show the current egg round',async()=>{
  const nodes=await loadPage();
  assert.match(nodes.rows.textContent,/放蛋：2 物品 \/ 2 记录/);

@@ -43,7 +43,7 @@ _fails = {}
 _audit_lock = threading.Lock()
 
 NEW_PASSWORD_ALPHABET = 'abcdefghijkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789'
-BOOK_LABELS = {'sales': '销售', 'stock': '库存', 'egg': '放蛋'}
+BOOK_LABELS = {'sales': '销售', 'stock': '库存', 'egg': '放蛋', 'placementStock': '投蛋库存'}
 
 
 # --------------------------------------------------------------------------- #
@@ -180,6 +180,8 @@ def ledger_stats(payload):
     if not isinstance(payload, dict):
         return result
     for book in BOOK_LABELS:
+        if book == 'placementStock' and book not in payload:
+            continue
         data = payload.get(book) or {}
         items = data.get('items') or []
         records = data.get('records') or []
@@ -365,7 +367,7 @@ def export_csv(username, payload):
 def account_activity(payload):
     """Read-only signals; recommendation-only saves do not count as ledger changes."""
     payload = payload if isinstance(payload, dict) else {}
-    stable = {k: v for k, v in payload.items() if k != 'revision'}
+    stable = {k: v for k, v in payload.items() if k not in ('revision', '_dailyRevisions')}
     egg = payload.get('egg') if isinstance(payload.get('egg'), dict) else {}
     if egg:
         stable['egg'] = {k: v for k, v in egg.items() if k != 'recommendation'}
@@ -821,7 +823,7 @@ class Handler(BaseHTTPRequestHandler):
             try:
                 if body.get('all_books') is True:
                     ledgers = fetch_ledgers(ids)
-                    result = {'op': op, 'books': {key: aggregate(ids, names, key, op, ledgers) for key in BOOK_LABELS}}
+                    result = {'op': op, 'books': {key: aggregate(ids, names, key, op, ledgers) for key in BOOK_LABELS if key != 'placementStock' or any('placementStock' in (row.get('payload') or {}) for row in ledgers.values())}}
                 else:
                     result = aggregate(ids, names, book, op)
             except Exception:

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {beijingDay,chooseRole,validProfile,newestProfile,TUTORIALS} from '../dist/onboarding.js';
+import {beijingDay,chooseRole,validProfile,newestProfile,TUTORIALS,tutorialFor} from '../dist/onboarding.js';
 
 test('roles select independent feature defaults without modifying any ledger',()=>{
  const sale=chooseRole('dismantle',true),egg=chooseRole('place',false);
@@ -29,4 +29,10 @@ test('both job tutorials have six distinct steps and explain their own feature d
  assert.match(TUTORIALS.dismantle.map(s=>s.body).join(''),/手动调整库存，不改变销售/);
  assert.match(TUTORIALS.place.map(s=>s.body).join(''),/7\/6/);
  assert.match(TUTORIALS.place.at(-1).body,/默认只开放蛋/);
+});
+test('daily profiles retain the outside feature choices and both daily tutorials explain protected jobs and optional stock',()=>{
+ const profile=validProfile({...chooseRole('place',true,Date.now(),'angel'),outsideBooks:{sales:true,stock:true,egg:false},outsideRole:'dismantle'});
+ assert.equal(profile.version,2);assert.equal(profile.roomKind,'angel');assert.deepEqual(profile.outsideBooks,{sales:true,stock:true,egg:false});
+ for(const role of ['dismantle','place']){const tutorial=tutorialFor(role,true);assert.equal(tutorial.length,8);assert.match(tutorial.map(e=>e.body).join(''),/不加入任何群聊/);assert.match(tutorial.at(-1).body,/L2385434375/);}
+ assert.match(tutorialFor('place',true).map(e=>e.body).join(''),/投蛋库存默认关闭/);
 });

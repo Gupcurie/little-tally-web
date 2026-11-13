@@ -7,7 +7,7 @@ import * as Ops from './operations.js';
 import {installItemDrag} from './reorder.js';
 import {startReconciliation} from './reconcile.js';
 import {reconcileDaily,dailyMarkup,aliasControls,mergeAliases,validAliases,dayBounds} from './reconcile-daily.js';
-import {ROLES,TUTORIALS,chooseRole,newestProfile,validProfile,beijingDay} from './onboarding.js';
+import {ROLES,TUTORIALS,tutorialFor,chooseRole,newestProfile,validProfile,beijingDay} from './onboarding.js';
 
 const icons={
  count:'<rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/>',
@@ -26,7 +26,7 @@ let eggPlanSyncTimer,eggPlanSyncTask=null;
 let itemDrag=null,orderSaving=false,renderedDay=null;
 let reconciliationTimer,comparisonCache=null,reconciliationData=null,reconcileMergeBusy=false;
 let toastTimer,formSubmit=null,restoreExpected=null,backupReady=null;
-let roleAccount=null,roleProfile=null,roleRequired=false,roleBusy=false,roleQueued=false,tutorialRole=null,tutorialStep=0;
+let roleAccount=null,roleProfile=null,roleRequired=false,roleBusy=false,roleQueued=false,tutorialRole=null,tutorialStep=0,featureScope=null;
 const onboarding=document.createElement('dialog');onboarding.id='onboarding';onboarding.className='onboarding-dialog';onboarding.setAttribute('aria-labelledby','onboarding-title');document.body.append(onboarding);
 icons.egg='<path d="M12 3c3.6 0 6.5 4.4 6.5 9.2 0 4.4-2.9 8.3-6.5 8.3S5.5 16.6 5.5 12.2C5.5 7.4 8.4 3 12 3z"/><path d="M9.5 9.5c.6-1.2 1.5-2 2.5-2"/>';
 const TAB_LABELS={count:'记数',egg:'放蛋',history:'历史',stats:'统计',ratio:'比例',settings:'设置'};
@@ -39,7 +39,7 @@ const loadBooks=()=>{try{const raw=JSON.parse(localStorage.getItem('little-tally
 const saveBooks=async books=>{
  if(localMode){try{localStorage.setItem('little-tally-books',JSON.stringify(books));}catch{}return;}
  if(roleBusy)throw Error('请等岗位设置保存后再调整功能。');
- if(roleProfile){roleBusy=true;try{await saveRoleProfile({...roleProfile,books,updatedAt:Date.now()});}finally{roleBusy=false;}}
+ if(roleProfile){roleBusy=true;try{await saveRoleProfile({...roleProfile,books,...(!dailyRoom()?{outsideBooks:books}:{}),updatedAt:Date.now()});}finally{roleBusy=false;}}
 };
 Object.assign(state,{eggPick:null,eggPlan:null,eggMotionKey:null,eggStatsLimit:80,eggOnlyLeft:false,eggItemID:null,eggSelecting:false,eggSelection:new Set(),eggDraft:null,eggCols:2,tabDrag:null,books:loadBooks(),statsGran:'hour',statsItem:null});
 const enabledBooks=()=>['sales','stock','egg'].filter(k=>state.books[k]);
@@ -61,7 +61,7 @@ function render(){
  document.body.classList.toggle('egg-screen',(localMode||ledger.signedIn)&&!ledger.loading&&!ledger.readOnly&&state.page==='egg'&&!state.eggItemID);
  document.querySelector('[data-icon="install"]').innerHTML=icon('install');
  if(!localMode&&(!ledger.signedIn||ledger.loading)){nav.hidden=true;main.innerHTML=loginView();return;}
- syncRoleAccount();
+ syncRoleAccount();syncWorkspaceFeatures();
  if(!state.books.egg&&state.page==='egg')state.page='count';
  if(!state.books.sales&&!state.books.stock&&state.page==='count')state.page='egg';
  nav.hidden=false;
@@ -94,7 +94,7 @@ function syncRoleAccount(){
  roleAccount=account;let cached;try{cached=JSON.parse(localStorage.getItem(roleStorageKey())||'null');}catch{}
  roleProfile=newestProfile(ledger.preferences,cached);
  state.books=roleProfile?{...roleProfile.books}:localMode?loadBooks():{sales:true,stock:true,egg:true};
- roleRequired=!localMode&&(isTutorialTestAccount()||roleProfile?.day!==beijingDay());
+ roleRequired=!localMode&&(isTutorialTestAccount()||roleProfile?.version!==2||roleProfile?.day!==beijingDay());
  tutorialRole=null;
  if(roleProfile)state.book=ROLES[roleProfile.role].book;
 }
@@ -108,29 +108,39 @@ async function saveRoleProfile(next){
 function queueOnboarding(){
  if(localMode||roleQueued||onboarding.open||sheet.open||ledger.loading||!ledger.signedIn||ledger.readOnly)return;
  if(!roleRequired&&!roleProfile?.tutorialPending)return;
- roleQueued=true;setTimeout(()=>{roleQueued=false;if(!ledger.signedIn||ledger.loading||ledger.readOnly||onboarding.open||sheet.open)return;if(roleRequired)showRoleChoice(true);else if(roleProfile?.tutorialPending)showTutorial(roleProfile.role);},0);
+ roleQueued=true;setTimeout(()=>{roleQueued=false;if(!ledger.signedIn||ledger.loading||ledger.readOnly||onboarding.open||sheet.open)return;if(roleRequired)showRoleChoice(true);else if(roleProfile?.tutorialPending)showTutorial(dailyRoom()?.role||roleProfile.role);},0);
 }
 function clearTutorialHighlight(){main.querySelectorAll('.tutorial-highlight').forEach(n=>n.classList.remove('tutorial-highlight'));}
 function closeOnboarding(){clearTutorialHighlight();tutorialRole=null;if(onboarding.open)onboarding.close();}
+function dailyRoom(){return !localMode&&ledger.state._dailyRoom||null;}
+function dailyExpired(){return Boolean(dailyRoom()&&dailyRoom().day!==beijingDay());}
+function syncWorkspaceFeatures(){
+ const d=dailyRoom(),scope=JSON.stringify([roleAccount,ledger.workspace?.id,d?.role]);
+ if(scope!==featureScope){
+  featureScope=scope;
+  state.books=d?(roleProfile?.roomKind===d.kind&&roleProfile?.role===d.role?{...roleProfile.books}:{...ROLES[d.role].books}):{...(roleProfile?.outsideBooks||roleProfile?.books||state.books)};
+ }
+ if(d){state.books.egg=d.role==='place'?state.books.egg:false;state.books.sales=d.role==='dismantle'?state.books.sales:false;state.books.stock=d.role==='place'?d.stockEnabled:state.books.stock;if(!Object.values(state.books).some(Boolean))state.books[d.role==='place'?'egg':'sales']=true;}
+}
 function showRoleChoice(required=false){
  if(state.bundle){toast('请先确认或取消这组多蛋购买。');return;}
  if(ledger.saving||orderSaving||roleBusy){toast('请等当前保存完成后再切换岗位。');return;}
- clearTutorialHighlight();tutorialRole=null;if(sheet.open)closeSheet();
- onboarding.dataset.mode='role';onboarding.dataset.required=required?'1':'0';
- const test=isTutorialTestAccount();
- onboarding.innerHTML=`<div class="onboarding-brand"><img src="./icon-192.png" alt=""><span>拆弹专家 · ${test?'教程测试':'岗位选择'}</span></div><h2 id="onboarding-title">今天负责什么？</h2><p class="onboarding-intro">${test?'账号 123 每次打开都会重新选择岗位。':'选好岗位，再开始记数。'}</p><div class="role-options">${['dismantle','place'].map(role=>`<button type="button" class="role-option" data-role-choice="${role}" data-newbie="1">${icon(role==='place'?'egg':'count')}<span><strong>第一次用，今天${ROLES[role].name}</strong><small>${role==='place'?'放蛋 · 查看详细教程':'销售和库存 · 查看详细教程'}</small></span>${icon('arrow')}</button>`).join('')}${['dismantle','place'].map(role=>`<button type="button" class="role-option experienced" data-role-choice="${role}" data-newbie="0"><span><strong>经常${ROLES[role].name}，不需要教程</strong><small>${role==='place'?'直接进入放蛋':'直接进入销售，可切换库存'}</small></span>${icon('arrow')}</button>`).join('')}</div><p class="role-note">拆弹默认开销售、库存；投蛋默认只开放蛋。其他功能可到设置打开，已有数据保留。</p><p class="onboarding-error" role="alert"></p>${required?'':'<button type="button" class="small-button onboarding-cancel" data-onboard="cancel">暂不切换</button>'}`;
+ clearTutorialHighlight();tutorialRole=null;if(sheet.open)closeSheet();onboarding.dataset.mode='role';onboarding.dataset.required=required?'1':'0';
+ const test=isTutorialTestAccount(),kinds=localMode?[null]:['angel','devil'];
+ const choices=kinds.map(kind=>`<section class="role-family">${kind?`<h3>${kind==='angel'?'天使':'恶魔'}大群</h3>`:''}<div class="role-options">${[true,false].flatMap(newbie=>['dismantle','place'].map(role=>`<button type="button" class="role-option ${newbie?'':'experienced'}" data-role-choice="${role}" data-room-kind="${kind||''}" data-newbie="${newbie?'1':'0'}"><span><strong>${newbie?'新手':'老手'} · ${ROLES[role].name}</strong><small>${newbie?'查看详细教程':'直接开始，不看教程'}</small></span>${icon('arrow')}</button>`)).join('')}</div></section>`).join('');
+ onboarding.innerHTML=`<div class="onboarding-brand"><img src="./icon-192.png" alt=""><span>拆弹专家 · ${test?'教程测试':'岗位选择'}</span></div><h2 id="onboarding-title">今天负责什么？</h2><p class="onboarding-intro">${test?'账号 123 每次打开都会重新选择。':'选择天使或恶魔，进入今天对应的大群。'}</p>${choices}<button type="button" class="role-option keep-workspace" data-role-choice="keep"><span><strong>不加入任何群聊</strong><small>保持之前使用的账本和功能</small></span>${icon('arrow')}</button><p class="role-note">拆弹负责销售、拆弹库存；投蛋负责放蛋，可另开独立库存清点。两岗都能查看今日对账。</p><p class="onboarding-error" role="alert"></p>${required?'':'<button type="button" class="small-button onboarding-cancel" data-onboard="cancel">暂不切换</button>'}`;
  if(!onboarding.open)onboarding.showModal();onboarding.scrollTop=0;
 }
 function showTutorial(role,step=0){
- if(!ROLES[role])return;tutorialRole=role;tutorialStep=Math.max(0,Math.min(TUTORIALS[role].length-1,step));
- const entry=TUTORIALS[role][tutorialStep],total=TUTORIALS[role].length;
+ if(!ROLES[role])return;tutorialRole=role;const entries=tutorialFor(role,Boolean(dailyRoom()));tutorialStep=Math.max(0,Math.min(entries.length-1,step));
+ const entry=entries[tutorialStep],total=entries.length;
  clearTutorialHighlight();if(sheet.open)closeSheet();state.page=entry.page;state.book=ROLES[role].book;state.itemID=null;state.eggItemID=null;history.replaceState(null,'','#'+state.page);render();
  onboarding.dataset.mode='tutorial';onboarding.dataset.required='0';
  onboarding.innerHTML=`<div class="tutorial-heading"><span class="badge">${ROLES[role].name}教程</span><button type="button" class="small-button" data-onboard="finish">暂时跳过</button></div><div class="tutorial-progress" aria-label="第 ${tutorialStep+1} 步，共 ${total} 步">${Array.from({length:total},(_,i)=>`<span class="${i<=tutorialStep?'done':''}"></span>`).join('')}</div><p class="tutorial-step">${String(tutorialStep+1).padStart(2,'0')} / ${String(total).padStart(2,'0')}</p><h2 id="onboarding-title">${entry.title}</h2><div class="tutorial-copy">${entry.body}</div><p class="onboarding-error" role="alert"></p><div class="tutorial-buttons"><button type="button" class="secondary-button" data-onboard="back" ${tutorialStep?'':'disabled'}>上一步</button><button type="button" class="primary-button" data-onboard="${tutorialStep===total-1?'finish':'next'}">${tutorialStep===total-1?'开始'+ROLES[role].name+'记数':'下一步'}</button></div>`;
  if(!onboarding.open)onboarding.showModal();onboarding.scrollTop=0;
  main.querySelector(entry.target)?.classList.add('tutorial-highlight');
 }
-function roleSettingsView(){return `<section class="panel role-settings"><h2>岗位与新手教程</h2><p class="hint">${roleProfile?'当前岗位：'+ROLES[roleProfile.role].name+'。':'选择岗位后，会设置对应的默认功能。'}切换岗位不修改账本数量。</p><button type="button" class="list-button" data-action="role-select">${icon('count')}<span>切换岗位</span>${icon('arrow')}</button><button type="button" class="list-button" data-action="tutorial-open">${icon('file')}<span>查看新手教程</span>${icon('arrow')}</button></section>`;}
+function roleSettingsView(){return `<section class="panel role-settings"><h2>岗位与新手教程</h2><p class="hint">${dailyRoom()?'当前大群岗位：'+ROLES[dailyRoom().role].name+'。':roleProfile?'当前岗位：'+ROLES[roleProfile.outsideRole||roleProfile.role].name+'。':'选择岗位后，会设置对应的默认功能。'}切换岗位不修改账本数量。</p><button type="button" class="list-button" data-action="role-select">${icon('count')}<span>切换岗位</span>${icon('arrow')}</button><button type="button" class="list-button" data-action="tutorial-open">${icon('file')}<span>查看新手教程</span>${icon('arrow')}</button></section>`;}
 onboarding.addEventListener('cancel',event=>{event.preventDefault();if(roleBusy)return;if(onboarding.dataset.mode==='tutorial')finishTutorial().catch(showOnboardingError);else if(onboarding.dataset.required!=='1')closeOnboarding();});
 function showOnboardingError(err){const node=onboarding.querySelector('.onboarding-error');if(node)node.textContent=err.message||'没有保存成功，请重试。';}
 async function finishTutorial(){
@@ -143,12 +153,21 @@ async function finishTutorial(){
 onboarding.addEventListener('click',async event=>{
  const button=event.target.closest('button');if(!button||roleBusy)return;
  if(button.dataset.roleChoice){
-  const role=button.dataset.roleChoice,newbie=button.dataset.newbie==='1';roleBusy=true;
-  onboarding.querySelectorAll('button').forEach(n=>n.disabled=true);
+  const role=button.dataset.roleChoice,newbie=button.dataset.newbie==='1',kind=button.dataset.roomKind;
+  const d=dailyRoom(),known=d&&d.kind===kind?{role:d.role}:ledger.teams?.find(t=>t.daily_kind===kind&&t.day===beijingDay());
+  if(role!=='keep'&&known?.role&&known.role!==role&&!window.confirm('将今天这个大群的岗位切换为「'+ROLES[role].name+'」？确认后会重新加载对应权限。'))return;
+  roleBusy=true;onboarding.querySelectorAll('button').forEach(n=>n.disabled=true);
   try{
    clearTimeout(eggPlanSyncTimer);clearTimeout(reconciliationTimer);if(eggPlanSyncTask)await eggPlanSyncTask.catch(()=>{});
-   await saveRoleProfile(chooseRole(role,newbie));roleRequired=false;state.books={...roleProfile.books};state.book=ROLES[role].book;resetWorkspaceUI();state.page=ROLES[role].page;history.replaceState(null,'','#'+state.page);
-   if(newbie)showTutorial(role);else{closeOnboarding();render();}
+   if(role==='keep'){
+    const prior=roleProfile||chooseRole(state.books.egg&&!state.books.sales?'place':'dismantle',false);
+    await saveRoleProfile({...prior,version:2,day:beijingDay(),books:{...state.books},tutorialPending:false,updatedAt:Date.now()});roleRequired=false;closeOnboarding();render();
+   }else{
+    const outsideBooks=d?roleProfile?.outsideBooks||{sales:true,stock:true,egg:true}:{...state.books},outsideRole=d?roleProfile?.outsideRole||'dismantle':roleProfile?.outsideRole||roleProfile?.role||'dismantle';
+    if(kind&&!localMode){const team=await ledger.joinDailyRoom(kind,role);await ledger.selectWorkspace(team);}
+    await saveRoleProfile({...chooseRole(role,newbie,Date.now(),kind),outsideBooks,outsideRole});roleRequired=false;featureScope=null;state.books={...roleProfile.books};state.book=ROLES[role].book;resetWorkspaceUI();state.page=ROLES[role].page;history.replaceState(null,'','#'+state.page);
+    if(newbie)showTutorial(role);else{closeOnboarding();render();}
+   }
   }catch(err){showOnboardingError(err);onboarding.querySelectorAll('button').forEach(n=>n.disabled=false);}
   finally{roleBusy=false;}return;
  }
@@ -200,12 +219,12 @@ function countView(){
  const scope=JSON.stringify([ledger.user?.id,ledger.workspace?.id,state.book]),scopeLabel=workspaceLabel();
  const totalText=fmt(total);
  return `<section class="count-dashboard ${sales?'count-sales':'count-stock'}" data-scope="${e(scope)}">
- <header class="count-summary"><h1>${sales?'销售总数':'库存总数'} <strong class="${totalText.length>8?'long':''}" data-testid="total">${totalText}<small>件</small></strong></h1>
+ <header class="count-summary"><h1>${sales?'销售总数':dailyRoom()?.role==='place'?'投蛋库存总数':'库存总数'} <strong class="${totalText.length>8?'long':''}" data-testid="total">${totalText}<small>件</small></strong></h1>
  ${localMode?'<button class="small-button count-scope" data-action="cloud-mode">本机体验 · 登录</button>':workspaceControls()}</header>
  ${state.bundle?bundleView():`<div class="count-topbar">${books.length>1?`<div class="book-switch" aria-label="选择账本">${books.map(k=>`<button class="${state.book===k?'active':''}" data-action="book" data-book="${k}" aria-pressed="${state.book===k}">${k==='sales'?'销售':'库存'}</button>`).join('')}</div>`:''}<button class="small-button count-copy" data-action="copy-count-report">${icon('copy')}${sales?'复制销售':'复制库存'}</button>${sales?'<button class="small-button" data-action="bundle-start">多蛋购买</button>':''}<button class="small-button" data-action="manage" aria-label="管理物品">管理</button></div>`}
  ${goalBanner(b)}
  ${b.items.length?`<div class="item-grid">${b.items.map(i=>`<article class="item-card${i.id===lastSaleId?' sales-flash':''}" data-item="${e(i.id)}"><button class="item-name" data-action="detail" data-id="${e(i.id)}"><span class="dot" style="background:${color(i)}"></span><span class="name">${e(i.name)}</span>${icon('arrow')}</button><button class="item-number ${String(c[i.id]).length>6?'long':''}" data-action="edit-count" data-id="${e(i.id)}" aria-label="修改${e(i.name)}数量">${fmt(c[i.id])}</button>${state.book==='stock'&&Object.keys(i.breakdown).length?`<div class="item-parts">${Object.entries(i.breakdown).map(([k,v])=>`${e(k)} ${fmt(v)}`).join(' · ')}</div>`:''}<div class="stepper"><button class="minus" data-action="decrease" data-id="${e(i.id)}" aria-label="${e(i.name)}减一" ${c[i.id]===0?'disabled':''}>${icon('minus')}</button><button class="plus" data-action="increase" data-id="${e(i.id)}" aria-label="${e(i.name)}加一">${icon('plus')}</button></div></article>`).join('')}</div>`:`<div class="count-empty"><button class="small-button" data-action="add-item">${icon('plus')}添加物品</button></div>`}
- <p class="count-save green" role="status">${icon('check')}<span>${e(timeBadge(false))}</span>${sales?reconciliationStatus():''}</p></section>`;
+ <p class="count-save green" role="status">${icon('check')}<span>${e(timeBadge(false))}</span>${sales||dailyRoom()?reconciliationStatus():''}</p></section>`;
 }
 function goalBanner(b){if(!b.goal)return '';try{const p=C.ratioPlan(b,b.goal);return `<div class="soft-message"><b>${p.added===0?'✓ 固定目标已达标':'◎ 固定目标 · 还需补充'}</b><div class="goal-chips">${b.items.filter(i=>p.additions[i.id]>0).map(i=>`<span>${e(i.name)} +${fmt(p.additions[i.id])}</span>`).join('')}${p.other>0?`<span>其他物品合计 +${fmt(p.other)}</span>`:''}</div></div>`;}catch{return '<div class="soft-message warn">固定目标需要调整，请到比例页查看。</div>';}}
 function recordLine(r,selectable=false){const i=book().items.find(i=>i.id===r.itemId);return `<div class="record-wrap"><div class="row">${selectable&&state.selecting?`<input class="record-check" type="checkbox" data-record="${e(r.id)}" aria-label="选择${e(i?.name)}这条记录" ${state.selection.has(r.id)?'checked':''}>`:`<span class="record-symbol ${r.delta<0?'negative':''}">${icon(r.delta>=0?'plus':'minus')}</span>`}<div class="row-main"><div class="row-title">${e(i?.name||'物品')}</div><div class="row-meta">${e(C.clock(r.at))}${r.kind==='set'?' · 手动改数':''}${r.bindingId?(state.book==='stock'?' · 销售联动':' · 已联动库存'):''}</div></div><span class="row-number ${r.delta<0?'red':'green'}">${r.delta>0?'+':''}${fmt(r.delta)}</span>${!state.selecting?`<button class="delete-small" data-action="delete-record" data-id="${e(r.id)}" aria-label="删除${e(i?.name)}这条记录">${icon('trash')}</button>`:''}</div></div>`;}
@@ -369,6 +388,7 @@ function ratioView(){
  <div class="section-spacer"></div><div class="heading-row"><h2>目标配比</h2>${b.goal?'<span class="badge">已有固定目标</span>':''}</div><div class="book-switch">${[['parts','比例份数'],['percent','百分比']].map(([k,label])=>`<button data-action="ratio-mode" data-mode="${k}" class="${state.ratioMode===k?'active':''}">${label}</button>`).join('')}</div><section class="panel">${b.items.map(i=>`<div class="ratio-row"><label><input type="checkbox" data-ratio-check="${e(i.id)}" ${state.ratioSelected.has(i.id)?'checked':''}><span>${e(i.name)}<small>现有 ${fmt(c[i.id])} 件</small></span></label><input class="ratio-input" data-ratio-value="${e(i.id)}" aria-label="${e(i.name)}${state.ratioMode==='parts'?'份数':'百分比'}" inputmode="${state.ratioMode==='parts'?'numeric':'decimal'}" placeholder="${state.ratioMode==='parts'?'份数':'%'}" value="${e(state.ratioValues[i.id]??'')}" ${state.ratioSelected.has(i.id)?'':'disabled'}>${state.ratioMode==='percent'?'<span class="muted" style="font-size:12px">%</span>':''}</div>`).join('')}<p class="hint">${state.ratioMode==='parts'?'按较大份数分轮补齐，未选物品不参与。70∶1 时，80/1 先补前者 60；141/1 先补后者 1。':'输入选中物品占全部物品的百分比，最多两位小数。未选物品会保留现有数量，并计算合计还需补多少。'}</p></section><button class="primary-button" data-action="calculate">${icon('ratio')}计算补齐方案</button>${state.ratioError?`<div class="soft-message error">${e(state.ratioError)}</div>`:''}${p?`<section class="panel" style="background:#fbe6ea"><h2>${p.added?'还需补充':'✓ 固定目标已达标'}</h2><p class="inline-caption">${e(p.note)}</p>${b.items.filter(i=>p.additions[i.id]>0).map(i=>`<div class="result-line"><span>${e(i.name)}</span><strong>+${fmt(p.additions[i.id])}</strong></div>`).join('')}${p.other?`<div class="result-line"><span>其他物品合计</span><strong>+${fmt(p.other)}</strong></div>`:''}<p class="hint">补完后总量 ${fmt(p.total)} 件</p><button class="primary-button" style="margin-top:15px" data-action="save-goal">保存为固定目标</button></section>`:''}${b.goal?'<button class="small-button red" style="width:100%;margin-top:12px" data-action="clear-goal">取消当前固定目标</button>':''}`;
 }
 function salesStockSettingsView(){
+ if(dailyRoom()?.role==='place')return '';
  const enabled=C.salesStockEnabled(ledger.state),stock=ledger.state.stock,sales=ledger.state.sales,quantities=C.counts(stock);
  return `<section class="panel sales-stock-settings"><div class="heading-row"><h2 style="margin:0">销售与库存绑定</h2><button class="small-button" data-action="sales-stock-toggle" aria-pressed="${enabled}" ${ledger.readOnly?'disabled':''}>${enabled?'关闭绑定':'开启绑定'}</button></div><p class="hint">${enabled?'已开启：销售加一，库存减一；销售减一，库存补回。':'当前关闭：销售和库存独立记数。开启后仅联动新的销量变化，不会扣减历史销量对应的库存。'}库存加减和盘点不改销售。</p>
  ${enabled?`<p class="hint">按同名品类自动对应，也可以自行选择。库存有分项时，请选择销售从哪个分项扣减。</p>${sales.items.map(item=>{const pair=C.salesStockPair(ledger.state,item.id),matched=stock.items.find(i=>i.id===pair?.stockId);return `<div class="binding-row"><strong>${e(item.name)}</strong><label>对应库存<select class="field-select" data-binding-sales="${e(item.id)}" aria-label="${e(item.name)}对应库存"><option value="">未绑定</option>${stock.items.map(i=>`<option value="${e(i.id)}" ${i.id===matched?.id?'selected':''}>${e(i.name)} · ${fmt(quantities[i.id])} 个</option>`).join('')}</select></label><label>扣减分项<select class="field-select" data-binding-part="${e(item.id)}" aria-label="${e(item.name)}扣减分项" ${matched?'':'disabled'}><option value="" ${pair?.part==null?'selected':''}>未分类${matched?' · '+fmt(quantities[matched.id]-C.partsTotal(matched))+' 个':''}</option>${matched?Object.entries(matched.breakdown).map(([name,n])=>`<option value="${e(name)}" ${name===pair?.part?'selected':''}>${e(name)} · ${fmt(n)} 个</option>`).join(''):''}</select></label></div>`;}).join('')||'<p class="hint">还没有销售品类。</p>'}<p class="hint">库存不足时整笔销售不会保存。关闭后新增操作互不影响；已联动的销售记录如需删除，会同时撤销对应库存变动。</p>`:''}</section>`;
@@ -376,7 +396,7 @@ function salesStockSettingsView(){
 function localSettingsView(){return `${pageHeading('KEEP EVERY LITTLE MOMENT','设置','本机自动保存 · 不需要注册账户')}${salesStockSettingsView()}<section class="panel"><div class="row"><span class="record-symbol">${icon('shield')}</span><div class="row-main"><div class="row-title">${ledger.readOnly?'记录处于保护状态':'自动保存已开启'}</div><div class="row-meta">${e(ledger.readOnly?ledger.error:timeBadge())}</div></div><span class="badge">本机</span></div><p class="hint">每次操作先写入成功，再更新数量；重新打开自动读取上次记录。保留上一份和跨日恢复副本，且不会自动用空数据覆盖损坏记录。</p></section>
  ${ledger.readOnly?`<section class="panel"><h2>恢复本机记录</h2>${ledger.recoverable?'<button class="primary-button" data-action="recover-local">恢复找到的本机副本</button>':'<p class="inline-caption">尚未找到有效本机副本，请从导出的完整备份恢复。</p>'}<button class="list-button" data-action="export-raw">${icon('download')}<span>导出未能读取的原文件</span>${icon('arrow','chevron')}</button><button class="list-button" data-action="import-all">${icon('upload')}<span>从完整备份恢复</span>${icon('arrow','chevron')}</button></section>`:`<section class="panel"><h2>完整备份与恢复</h2><button class="list-button" data-action="export-all">${icon('download')}<span>导出全部记录</span><span class="badge" style="flex:0">推荐</span>${icon('arrow','chevron')}</button><button class="list-button" data-action="import-all">${icon('upload')}<span>从完整备份恢复</span>${icon('arrow','chevron')}</button><button class="list-button" data-action="previous">${icon('history')}<span>找回上一份本机副本</span>${icon('arrow','chevron')}</button><button class="list-button" data-action="copy-report">${icon('copy')}<span>复制今日记数与库存</span>${icon('arrow','chevron')}</button></section><section class="panel"><h2>安卓／iOS 账本迁移</h2>${['sales','stock'].map(k=>`<button class="list-button" data-action="export-book" data-book="${k}">${icon('download')}<span>导出${title(k)}</span>${icon('arrow','chevron')}</button><button class="list-button" data-action="import-book" data-book="${k}">${icon('upload')}<span>导入${title(k)}备份</span>${icon('arrow','chevron')}</button>`).join('')}</section>`}
  <section class="panel"><h2>在手机上更顺手</h2><button class="list-button" data-action="install">${icon('install')}<span>添加到主屏幕</span>${icon('arrow','chevron')}</button><button class="list-button" data-action="persist">${icon('shield')}<span>${ledger.protection?'已获浏览器持久存储权限':'请求浏览器保留本机记录'}</span>${icon('arrow','chevron')}</button></section><div class="backup-note"><b>本机保存，也要留一份备份。</b><br>清除网站数据、换浏览器或设备，会影响本机记录。请把“全部记录”备份存到“文件”App 或自己的网盘。添加到主屏幕后，请固定从同一个入口使用；不同浏览器和主屏幕版可能拥有不同的存储空间。<br><br>网页代码可以公开访问，你的计数记录只保存在当前设备，不会上传到 GitHub。</div><p class="hint" style="text-align:center;margin-top:25px">拆弹专家 · 本机模式</p>`;}
-function settingsView(){if(localMode)return localSettingsView();return `${pageHeading('KEEP EVERY LITTLE MOMENT','设置','独立账户 · 云端保存 · 本机备用副本')}${salesStockSettingsView()}<section class="panel"><div class="row"><span class="record-symbol">${icon('shield')}</span><div class="row-main"><div class="row-title">${e(ledger.user?.username||'我的账户')}</div><div class="row-meta">${e(ledger.readOnly?ledger.error:timeBadge())}</div></div><span class="badge">云端账户</span></div><p class="hint">每次操作收到云端保存确认后再更新数量。再次登录读取当前账户的云端记录，其他账户不能读取你的账本。</p>${ledger.cacheWarning?`<p class="sheet-error">${e(ledger.cacheWarning)}</p>`:''}<button class="list-button" data-action="sync-cloud">${icon('history')}<span>重新同步云端记录</span>${icon('arrow','chevron')}</button></section><section class="panel"><h2>启用的功能</h2>${[['sales','销售记数'],['stock','库存点数'],['egg','放蛋']].map(([k,label])=>`<div class="row"><div class="row-main"><div class="row-title">${label}</div><div class="row-meta">${state.books[k]?'已开启':'已关闭'}</div></div><button class="small-button" data-action="book-toggle" data-book="${k}">${state.books[k]?'关闭':'开启'}</button></div>`).join('')}<p class="hint">关掉的功能会从底部导航、历史、统计、比例里一起隐藏；三个都可以同时开启。</p></section><section class="panel"><h2>底部功能顺序</h2>${TABS.map((p,i)=>`<div class="order-row"><span>${TAB_LABELS[p]}</span><span class="order-buttons"><button class="ghost small" data-action="tab-up" data-page="${p}" ${i===0?'disabled':''}>↑</button><button class="ghost small" data-action="tab-down" data-page="${p}" ${i===TABS.length-1?'disabled':''}>↓</button></span></div>`).join('')}<p class="hint">除了长按底部按钮拖动，也可以在这里上下调。</p></section><section class="panel"><h2>账户安全</h2><button class="list-button" data-action="change-password">${icon('shield')}<span>修改密码</span>${icon('arrow','chevron')}</button><p class="hint">要先输入现在的密码，再输入两次新密码。</p></section><section class="panel"><h2>备份与恢复</h2>${ledger.readOnly?`<button class="list-button" data-action="export-raw">${icon('download')}<span>导出当前原始文件</span>${icon('arrow','chevron')}</button>`:`<button class="list-button" data-action="export-all">${icon('download')}<span>导出当前账户全部记录</span>${icon('arrow','chevron')}</button>`}<button class="list-button" data-action="import-all">${icon('upload')}<span>从完整备份恢复到当前账户</span>${icon('arrow','chevron')}</button><button class="list-button" data-action="previous">${icon('history')}<span>恢复上一份云端副本</span>${icon('arrow','chevron')}</button><p class="hint">云端保留最近 5 个历史版本供恢复。它们仍位于同一数据库，重要记录请另外导出保存。</p></section>${!ledger.readOnly?`<section class="panel"><h2>账本迁移与分享</h2>${['sales','stock'].map(k=>`<button class="list-button" data-action="export-book" data-book="${k}">${icon('download')}<span>导出${title(k)}</span>${icon('arrow','chevron')}</button><button class="list-button" data-action="import-book" data-book="${k}">${icon('upload')}<span>导入${title(k)}备份</span>${icon('arrow','chevron')}</button>`).join('')}<button class="list-button" data-action="copy-report">${icon('copy')}<span>复制今日记数与库存</span>${icon('arrow','chevron')}</button></section>`:''}<section class="panel"><h2>在手机上更顺手</h2><button class="list-button" data-action="install">${icon('install')}<span>添加到主屏幕</span>${icon('arrow','chevron')}</button><button class="list-button" data-action="persist">${icon('shield')}<span>请求保留本机备用副本</span>${icon('arrow','chevron')}</button></section><button class="secondary-button" data-action="logout" ${ledger.saving?'disabled':''}>退出当前账户</button><div class="backup-note">退出登录不会删除云端记录。同一台手机换人使用，请先退出当前账户；退出时会清除本页面的账本和当前账户的本机备用副本。<br><br>记录保存在站点服务器。重要记录请定期导出备份。</div><p class="hint" style="text-align:center;margin-top:25px">拆弹专家 · 云端模式</p>`;}
+function settingsView(){if(localMode)return localSettingsView();return `${pageHeading('KEEP EVERY LITTLE MOMENT','设置','独立账户 · 云端保存 · 本机备用副本')}${salesStockSettingsView()}<section class="panel"><div class="row"><span class="record-symbol">${icon('shield')}</span><div class="row-main"><div class="row-title">${e(ledger.user?.username||'我的账户')}</div><div class="row-meta">${e(ledger.readOnly?ledger.error:timeBadge())}</div></div><span class="badge">云端账户</span></div><p class="hint">每次操作收到云端保存确认后再更新数量。再次登录读取当前账户的云端记录，其他账户不能读取你的账本。</p>${ledger.cacheWarning?`<p class="sheet-error">${e(ledger.cacheWarning)}</p>`:''}<button class="list-button" data-action="sync-cloud">${icon('history')}<span>重新同步云端记录</span>${icon('arrow','chevron')}</button></section><section class="panel"><h2>启用的功能</h2>${[['sales','销售记数'],['stock','库存点数'],['egg','放蛋']].map(([k,label])=>`<div class="row"><div class="row-main"><div class="row-title">${label}</div><div class="row-meta">${state.books[k]?'已开启':'已关闭'}</div></div><button class="small-button" data-action="book-toggle" data-book="${k}" ${dailyRoom()&&(dailyRoom().role==='dismantle'?k==='egg':k==='sales')?'disabled title="当前大群岗位不可开启，切换到个人或普通群后可开启"':''}>${state.books[k]?'关闭':'开启'}</button></div>`).join('')}<p class="hint">${dailyRoom()?(dailyRoom().role==='place'?'投蛋库存为独立清点，默认关闭，不联动销售或放蛋；销售只能离开大群后开启。':'当前拆弹岗位不能开启放蛋，离开大群后可在设置开启。'):'关掉的功能会从底部导航、历史、统计、比例里一起隐藏；三个都可以同时开启。'}</p></section><section class="panel"><h2>底部功能顺序</h2>${TABS.map((p,i)=>`<div class="order-row"><span>${TAB_LABELS[p]}</span><span class="order-buttons"><button class="ghost small" data-action="tab-up" data-page="${p}" ${i===0?'disabled':''}>↑</button><button class="ghost small" data-action="tab-down" data-page="${p}" ${i===TABS.length-1?'disabled':''}>↓</button></span></div>`).join('')}<p class="hint">除了长按底部按钮拖动，也可以在这里上下调。</p></section><section class="panel"><h2>账户安全</h2><button class="list-button" data-action="change-password">${icon('shield')}<span>修改密码</span>${icon('arrow','chevron')}</button><p class="hint">要先输入现在的密码，再输入两次新密码。</p></section><section class="panel"><h2>备份与恢复</h2>${ledger.readOnly?`<button class="list-button" data-action="export-raw">${icon('download')}<span>导出当前原始文件</span>${icon('arrow','chevron')}</button>`:`<button class="list-button" data-action="export-all">${icon('download')}<span>导出当前账户全部记录</span>${icon('arrow','chevron')}</button>`}<button class="list-button" data-action="import-all">${icon('upload')}<span>从完整备份恢复到当前账户</span>${icon('arrow','chevron')}</button><button class="list-button" data-action="previous">${icon('history')}<span>恢复上一份云端副本</span>${icon('arrow','chevron')}</button><p class="hint">云端保留最近 5 个历史版本供恢复。它们仍位于同一数据库，重要记录请另外导出保存。</p></section>${!ledger.readOnly?`<section class="panel"><h2>账本迁移与分享</h2>${['sales','stock'].map(k=>`<button class="list-button" data-action="export-book" data-book="${k}">${icon('download')}<span>导出${title(k)}</span>${icon('arrow','chevron')}</button><button class="list-button" data-action="import-book" data-book="${k}">${icon('upload')}<span>导入${title(k)}备份</span>${icon('arrow','chevron')}</button>`).join('')}<button class="list-button" data-action="copy-report">${icon('copy')}<span>复制今日记数与库存</span>${icon('arrow','chevron')}</button></section>`:''}<section class="panel"><h2>在手机上更顺手</h2><button class="list-button" data-action="install">${icon('install')}<span>添加到主屏幕</span>${icon('arrow','chevron')}</button><button class="list-button" data-action="persist">${icon('shield')}<span>请求保留本机备用副本</span>${icon('arrow','chevron')}</button></section><button class="secondary-button" data-action="logout" ${ledger.saving?'disabled':''}>退出当前账户</button><div class="backup-note">退出登录不会删除云端记录。同一台手机换人使用，请先退出当前账户；退出时会清除本页面的账本和当前账户的本机备用副本。<br><br>记录保存在站点服务器。重要记录请定期导出备份。</div><p class="hint" style="text-align:center;margin-top:25px">拆弹专家 · 云端模式</p>`;}
 // ---------------------------------------------------------------------------
 // 放蛋
 // ---------------------------------------------------------------------------
@@ -477,11 +497,13 @@ function eggPlanStatus(){
  return JSON.stringify(eggBook().recommendation)===JSON.stringify(state.eggPlan?.snapshot)?'已同步后台':'待同步后台';
 }
 function queueEggPlanSync(){
+ if(dailyExpired())return;
  if(localMode||!ledger.signedIn||ledger.loading||ledger.readOnly||!eggBook().items.length)return;
  const plan=eggPlan(eggBook());
  if(JSON.stringify(eggBook().recommendation)===JSON.stringify(plan.snapshot))return;
  clearTimeout(eggPlanSyncTimer);
  eggPlanSyncTimer=setTimeout(()=>{
+  if(dailyExpired())return;
   if(ledger.saving||eggPlanSyncTask){queueEggPlanSync();return;}
   const egg=eggBook(),current=eggPlan(egg),key=eggPickKey(egg),snapshot=C.clone(current.snapshot);
   eggPlanSyncTask=ledger.commit(s=>{const target=C.ensureEgg(s);if(eggPickKey(target)!==key)throw new Error('数量已变化，请重试推荐同步。');target.recommendation=snapshot;});
@@ -490,7 +512,7 @@ function queueEggPlanSync(){
 }
 function eggView(){
  const egg=eggBook();
- if(!egg.items.length)return `<section class="egg-empty">${icon('egg')}<strong>还没有放蛋物品</strong><div class="egg-empty-actions"><button class="primary-button" data-action="egg-add-item">添加物品</button><button class="secondary-button" data-action="page" data-page="ratio">设置比例</button></div></section>`;
+ if(!egg.items.length)return `${reconciliationStatus()}<section class="egg-empty">${icon('egg')}<strong>还没有放蛋物品</strong><div class="egg-empty-actions"><button class="primary-button" data-action="egg-add-item">添加物品</button><button class="secondary-button" data-action="page" data-page="ratio">设置比例</button></div></section>`;
  const progress=C.eggProgress(egg);
  const byId=Object.fromEntries(progress.map(p=>[p.id,p])),ids=eggOrder(egg).filter(id=>byId[id]);
  const shown=state.eggOnlyLeft?ids.filter(id=>byId[id].left>0):ids;
@@ -621,20 +643,23 @@ function dailyComparisonData(){
 function reconciliationResult(){
  const data=dailyComparisonData(),day=dayBounds().day;
  if(comparisonCache?.snapshot===ledger.state&&comparisonCache?.data===data&&comparisonCache?.version===data.version&&comparisonCache?.day===day)return comparisonCache.result;
- const result=reconcileDaily([...data.archives.map(p=>p.egg),ledger.state.egg],[...data.archives.map(p=>p.sales),ledger.state.sales],{aliases:ledger.state.reconciliation?.aliases||[]});
+ const d=dailyRoom(),remote=data.remote||{};
+ const result=reconcileDaily(d?remote.egg:[...data.archives.map(p=>p.egg),ledger.state.egg],d?remote.sales:[...data.archives.map(p=>p.sales),ledger.state.sales],{aliases:ledger.state.reconciliation?.aliases||[]});
  comparisonCache={snapshot:ledger.state,data,version:data.version,day,result};return result;
 }
 function reconciliationStatus(){
- if(!state.books.sales||!state.books.egg)return '';
+ if(!dailyRoom()&&(!state.books.sales||!state.books.egg))return '';
  const data=dailyComparisonData(),result=reconciliationResult();
- const label=!data.loaded?'正在读取今日对账…':data.error?'对账读取不完整':result.status==='review'?'今日对账待核对 '+(result.waiting+result.unmatched):result.waiting?'对账 · 待对应 '+result.waiting:'今日数量一致';
+ const label=!data.loaded||data.loading?'正在读取今日对账…':data.error?'对账读取不完整':result.status==='review'?'今日对账待核对 '+(result.waiting+result.unmatched):result.waiting?'对账 · 待对应 '+result.waiting:'今日数量一致';
  return `<button type="button" class="reconcile-status ${data.error?'error':result.status}" data-action="reconcile-open">${label}</button>`;
 }
 async function queueReconciliationStart(force=false){
- if(ledger.readOnly||ledger.loading||!state.books.sales||!state.books.egg)return;
- const data=dailyComparisonData();if(data.loading||data.loaded&&!force)return;
- data.loading=true;data.error=null;
+ if(ledger.readOnly||ledger.loading||!dailyRoom()&&(!state.books.sales||!state.books.egg))return;
+ const data=dailyComparisonData();if(data.loading||data.loaded&&!force&&(!dailyRoom()||data.revision>=ledger.cloudRevision))return;
+ data.loading=true;data.error=null;main.querySelectorAll('.reconcile-status').forEach(node=>node.textContent='正在同步今日对账…');
+ const showing=sheetContent.querySelector('.reconciliation-content');if(showing&&data.loaded&&!showing.querySelector('[data-reconcile-sync]'))showing.insertAdjacentHTML('afterbegin','<p class="hint" data-reconcile-sync>正在同步最新记录，下面为上次完整结果。</p>');
  try{
+  if(dailyRoom()){const remote=await ledger.dailyComparison();if(reconciliationData!==data)return;data.remote=remote;data.revision=Number(remote.revision);data.loaded=true;data.version++;return;}
   const bounds=dayBounds(),periods=(await periodList()).filter(p=>p.endedAt>=bounds.start&&p.startedAt<=bounds.end).sort((a,b)=>a.endedAt-b.endedAt),archives=[];
   for(let i=0;i<periods.length;i+=4){
    const batch=await Promise.all(periods.slice(i,i+4).map(async p=>localMode?p.payload:await ledger.request('rpc/tally_period_read',{method:'POST',body:{p_id:p.id}})));
@@ -675,8 +700,8 @@ async function showTeamDetails(){
  const team=ledger.workspace;if(!team)return showWorkspaceSheet();
  const data=await ledger.teamDetails();
  if(ledger.workspace?.id!==team.id)return;
- const owner=data.owner_id===ledger.user.id;
- showSheet('群：'+team.name,`<p>当前 ${data.members.length} 人</p><div class="team-members">${data.members.map(member=>`<div class="team-member"><span>${e(member.name)}${member.user_id===data.owner_id?' · 群主':''}</span>${owner&&member.user_id!==data.owner_id?`<button type="button" class="small-button" data-action="team-kick" data-id="${e(member.user_id)}" data-team="${e(team.id)}" data-name="${e(member.name)}">移出群</button>`:''}</div>`).join('')}</div>${owner?`<button type="button" class="danger-button" data-action="team-dissolve" data-team="${e(team.id)}">解散群</button>`:''}`);
+ const owner=data.owner_id===ledger.user.id,canKick=data.can_kick??owner,daily=Boolean(data.daily_kind);
+ showSheet('群：'+team.name,`<p>当前 ${data.members.length} 人</p><div class="team-members">${data.members.map(member=>`<div class="team-member"><span>${e(member.name)}${daily?' · '+(ROLES[member.role]?.name||'成员'):member.user_id===data.owner_id?' · 群主':''}</span>${canKick&&member.user_id!==ledger.user.id?`<button type="button" class="small-button" data-action="team-kick" data-id="${e(member.user_id)}" data-team="${e(team.id)}" data-name="${e(member.name)}">移出群</button>`:''}</div>`).join('')}</div>${owner&&!daily?`<button type="button" class="danger-button" data-action="team-dissolve" data-team="${e(team.id)}">解散群</button>`:''}`);
 }
 function workspaceLabel(){return ledger.workspace?'群：'+ledger.workspace.name:'个人：'+(ledger.user?.username||'我的账号');}
 function workspaceBar(){
@@ -684,7 +709,7 @@ function workspaceBar(){
  return workspaceControls();
 }
 function bundleView(){return `<section class="bundle-panel"><header><strong>多蛋购买 · ${state.bundle.length}/${state.bundleLimit}</strong><div class="button-pair"><button class="secondary-button" data-action="bundle-cancel">取消</button><button class="primary-button" data-action="bundle-confirm" ${state.bundle.length===state.bundleLimit?'':'disabled'}>确认这${state.bundleLimit}件</button></div></header><div class="bundle-slots" aria-label="点商品加一填入；确认后一起保存">${Array.from({length:state.bundleLimit},(_,k)=>{const name=book().items.find(i=>i.id===state.bundle[k])?.name;return `<button type="button" data-action="bundle-remove" data-index="${k}" title="${e(name||'空位')}" ${name?`aria-label="移除${e(name)}"`:'disabled'}>${e(name||'空位')}</button>`;}).join('')}</div></section>`;}
-function daySettingsView(){return `<section class="panel"><h2>日期与分段</h2><label>日历 <input type="date" class="field-input" id="calendar-date" value="${C.day(Date.now())}"></label><p class="hint">跨天会继续当前数据。只有主动开启新的一天才结算、归零；历史分段保留。</p><button class="list-button" data-action="day-calendar">查看日期 / 历史分段</button><button class="list-button" data-action="day-open">开启新的一天 / 选择继承</button></section>`;}
+function daySettingsView(){if(dailyRoom())return `<section class="panel"><h2>今日大群</h2><p class="hint">${e(dailyRoom().day)} · 每天使用新的天使／恶魔大群，当前群账本不会整组清零。可切回个人或普通群使用日期分段功能。</p></section>`;return `<section class="panel"><h2>日期与分段</h2><label>日历 <input type="date" class="field-input" id="calendar-date" value="${C.day(Date.now())}"></label><p class="hint">跨天会继续当前数据。只有主动开启新的一天才结算、归零；历史分段保留。</p><button class="list-button" data-action="day-calendar">查看日期 / 历史分段</button><button class="list-button" data-action="day-open">开启新的一天 / 选择继承</button></section>`;}
 async function periodList(){if(localMode)return ledger.state.periodArchives||[];return ledger.listPeriods();}
 async function openDaySheet(){
  const endedAt=Date.now(),periods=[{id:'current',startedAt:ledger.state.periodStartedAt||endedAt,endedAt,summary:Ops.segmentSummary(ledger.state)},...await periodList()];state.periods=periods;
@@ -716,7 +741,7 @@ async function featureAction(a,node){
  if(a==='egg-totals'){showSheet('放蛋累计总数',`<p>累计 ${fmt(C.eggTotal(eggBook()))} 个 · 第 ${C.eggRound(eggBook())+1} 轮</p>${C.eggProgress(eggBook()).map(i=>`<div class="stock-part-row"><span>${e(i.name)}</span><strong>${fmt(i.count)}</strong></div>`).join('')}`);return true;}
  if(a==='egg-copy-options'){showSheet('复制放蛋数据','<button type="button" class="list-button" data-action="egg-copy-current">复制当前轮数</button><button type="button" class="list-button" data-action="egg-copy-total">复制累计总数</button>');return true;}
  if(a==='egg-copy-current'||a==='egg-copy-total'){await copyEggMode(a==='egg-copy-total'?'total':'current');return true;}
- if(a==='day-open'){clearTimeout(eggPlanSyncTimer);if(eggPlanSyncTask)await eggPlanSyncTask.catch(()=>{});await openDaySheet();return true;}
+ if(a==='day-open'){if(dailyRoom())throw Error('今日大群不能整组清零，请切回个人或普通群操作。');clearTimeout(eggPlanSyncTimer);if(eggPlanSyncTask)await eggPlanSyncTask.catch(()=>{});await openDaySheet();return true;}
  if(a==='day-calendar'){const date=document.querySelector('#calendar-date')?.value||C.day(Date.now()),periods=await periodList(),selected=Ops.selectPeriods(periods,date,date);showSheet(date+' · 已结算分段',selected.map(p=>`<section class="panel"><h3>${e(C.clock(p.startedAt,true))} — ${e(C.clock(p.endedAt,true))}</h3><button type="button" class="small-button" data-action="period-read" data-id="${e(p.id)}">查看完整记录</button>${['sales','stock','egg'].map(k=>`<details><summary>${{sales:'销售',stock:'库存',egg:'放蛋'}[k]}：${fmt(p.summary?.[k]?.total||0)}</summary>${(p.summary?.[k]?.items||[]).map(i=>`<p>${e(i.name)}：${fmt(i.quantity)}</p>`).join('')}</details>`).join('')}</section>`).join('')||'<p>该日期没有结算段；未主动结算的数据继续保留在当前账本。</p>');return true;}
  if(a==='period-read'){
   const snapshot=localMode?(ledger.state.periodArchives||[]).find(p=>p.id===id)?.payload:await ledger.request('rpc/tally_period_read',{method:'POST',body:{p_id:id}});
@@ -733,7 +758,7 @@ async function featureAction(a,node){
 async function action(a,node){
  if(a==='role-select'||a==='tutorial-open'){
   if(state.bundle){toast('请先确认或取消这组多蛋购买。');return;}
-  if(a==='role-select'||!roleProfile)showRoleChoice(false);else showTutorial(roleProfile.role);return;
+  if(a==='role-select'||!roleProfile)showRoleChoice(false);else showTutorial(dailyRoom()?.role||roleProfile.outsideRole||roleProfile.role);return;
  }
  if(a==='reconcile-open'){showReconciliation();return;}
  if(a==='reconcile-refresh'){if(ledger.saving||reconcileMergeBusy)throw Error('请等保存完成后再刷新。');if(!localMode)await ledger.reload();await queueReconciliationStart(true);refreshReconciliationDetail();return;}
@@ -777,7 +802,7 @@ async function action(a,node){
  if(a==='stats-hour'){state.selectedHour=Number(node.dataset.hour);state.statsGran='minute';render();return;}
  if(a==='egg-mode'){state.books={sales:state.books.sales,stock:state.books.stock,egg:!state.books.egg};saveBooks(state.books);render();return;}
  if(a==='sales-stock-toggle'){node.disabled=true;try{await mutateState(s=>C.setSalesStockEnabled(s,!C.salesStockEnabled(s)));}finally{if(node.isConnected)node.disabled=false;}return;}
- if(a==='book-toggle'){const k=node.dataset.book,next={...state.books,[k]:!state.books[k]};if(!next.sales&&!next.stock&&!next.egg){toast('至少要留一个功能。');return;}node.disabled=true;try{await saveBooks(next);state.books=next;}finally{if(node.isConnected)node.disabled=false;}if(!enabledBooks().includes(state.book))state.book=enabledBooks()[0];if(!next.egg&&state.page==='egg'){state.page='count';state.eggItemID=null;history.replaceState(null,'','#count');}if(!next.sales&&!next.stock&&state.page==='count'){state.page='egg';history.replaceState(null,'','#egg');}render();return;}
+ if(a==='book-toggle'){const k=node.dataset.book,d=dailyRoom();if(d&&(d.role==='dismantle'?k==='egg':k==='sales'))throw Error('当前大群岗位不能开启这个功能，切换到个人或普通群后可以开启。');if(d?.role==='place'&&k==='stock'){await ledger.setDailyStock(!d.stockEnabled);render();return;}const next={...state.books,[k]:!state.books[k]};if(!next.sales&&!next.stock&&!next.egg){toast('至少要留一个功能。');return;}node.disabled=true;try{await saveBooks(next);state.books=next;}finally{if(node.isConnected)node.disabled=false;}if(!enabledBooks().includes(state.book))state.book=enabledBooks()[0];if(!next.egg&&state.page==='egg'){state.page='count';state.eggItemID=null;history.replaceState(null,'','#count');}if(!next.sales&&!next.stock&&state.page==='count'){state.page='egg';history.replaceState(null,'','#egg');}render();return;}
  if(a==='tab-up'||a==='tab-down'){const p=node.dataset.page,i=TABS.indexOf(p),j=a==='tab-up'?i-1:i+1;if(i<0||j<0||j>=TABS.length){return;}[TABS[i],TABS[j]]=[TABS[j],TABS[i]];saveTabs(TABS);render();return;}
  if(a==='egg-plan'){showEggPlan();return;}
  if(a==='egg-plan-refresh'){regenerateEggPlan(eggBook());render();showEggPlan();return;}
@@ -896,7 +921,7 @@ window.addEventListener('hashchange',()=>{const p=location.hash.slice(1);if(['co
 window.addEventListener('pageshow',()=>{if(ledger.db&&!ledger.saving)ledger.reload().then(render).catch(()=>{});});
 document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible'&&ledger.db&&!ledger.saving)ledger.reload().then(render).catch(()=>{});});
 if(localMode&&ledger.channel)ledger.channel.onmessage=()=>{if(!ledger.saving)ledger.reload().then(()=>{render();toast('已同步本机另一页面的最新记录。');}).catch(()=>{});};
-ledger.onchange=()=>{if(ledger.workspaceNotice){toast(ledger.workspaceNotice);ledger.workspaceNotice=null;resetWorkspaceUI();if(sheet.open)closeSheet();}if(!localMode&&!ledger.signedIn){roleAccount=null;roleProfile=null;roleRequired=false;closeOnboarding();state.bundle=null;clearTimeout(eggPlanSyncTimer);state.eggPick=null;state.eggPlan=null;if(sheet.open)closeSheet();state.itemID=null;state.selection.clear();state.ratioValues=Object.create(null);state.ratioSelected.clear();state.ratioPlan=null;}render();};
+ledger.onchange=()=>{if(ledger.workspaceNotice){toast(ledger.workspaceNotice);ledger.workspaceNotice=null;resetWorkspaceUI();if(sheet.open)closeSheet();}if(!localMode&&!ledger.signedIn){roleAccount=null;roleProfile=null;roleRequired=false;featureScope=null;closeOnboarding();state.bundle=null;clearTimeout(eggPlanSyncTimer);state.eggPick=null;state.eggPlan=null;if(sheet.open)closeSheet();state.itemID=null;state.selection.clear();state.ratioValues=Object.create(null);state.ratioSelected.clear();state.ratioPlan=null;}render();};
 await ledger.init();render();
 if('serviceWorker'in navigator)navigator.serviceWorker.register('./sw.js').catch(()=>{});
 setInterval(()=>{if(document.visibilityState==='visible'&&!sheet.open&&['count','stats'].includes(state.page)&&renderedDay!==C.day(Date.now()))render();},30000);

@@ -354,3 +354,9 @@ button.egg-reco-main{align-self:stretch;text-align:left;background:transparent;c
 .reconcile-alias-group button{background:#f8e5ea;color:#922e48;border-radius:7px;padding:8px;flex:none;min-height:36px}
 .reconcile-alias-error{color:#ae2848!important;font-size:12px}.reconcile-status.review{background:#fff0dc;color:#855b13;border-color:#eac080}
 @media(max-width:330px){.reconcile-alias-pickers{grid-template-columns:1fr}}
+
+.role-family{margin:14px 0}.role-family h3{font-size:14px;margin:0 0 8px;color:#91465b}
+.role-family .role-options{grid-template-columns:1fr 1fr;gap:7px}
+.role-family .role-option{padding:11px 9px;gap:4px}
+.role-family .role-option strong{font-size:13px}.role-family .role-option small{font-size:11px;line-height:1.5}
+.keep-workspace{width:100%;background:#fff;margin-top:14px;padding:12px}

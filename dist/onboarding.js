@@ -5,18 +5,46 @@ export const ROLES={
 };
 export function beijingDay(at=Date.now()){return new Date(at+8*3600000).toISOString().slice(0,10);}
 export function validProfile(value){
- if(!value||value.version!==1||!Object.hasOwn(ROLES,value.role)||!/^\d{4}-\d{2}-\d{2}$/.test(value.day)||!Number.isSafeInteger(value.updatedAt)||value.updatedAt<0)return null;
+ if(!value||![1,2].includes(value.version)||!Object.hasOwn(ROLES,value.role)||!/^\d{4}-\d{2}-\d{2}$/.test(value.day)||!Number.isSafeInteger(value.updatedAt)||value.updatedAt<0)return null;
  const b=value.books;if(!b||!['sales','stock','egg'].every(k=>typeof b[k]==='boolean')||!Object.values({sales:b.sales,stock:b.stock,egg:b.egg}).some(Boolean))return null;
- return {version:1,day:value.day,role:value.role,books:{sales:b.sales,stock:b.stock,egg:b.egg},tutorialPending:value.tutorialPending===true,updatedAt:value.updatedAt};
+ const out={version:value.version,day:value.day,role:value.role,books:{sales:b.sales,stock:b.stock,egg:b.egg},tutorialPending:value.tutorialPending===true,updatedAt:value.updatedAt};
+ if(['angel','devil'].includes(value.roomKind))out.roomKind=value.roomKind;
+ if(value.outsideBooks&&['sales','stock','egg'].every(k=>typeof value.outsideBooks[k]==='boolean')&&['sales','stock','egg'].some(k=>value.outsideBooks[k]))out.outsideBooks={sales:value.outsideBooks.sales,stock:value.outsideBooks.stock,egg:value.outsideBooks.egg};
+ if(Object.hasOwn(ROLES,value.outsideRole))out.outsideRole=value.outsideRole;
+ return out;
 }
-export function chooseRole(role,newbie,at=Date.now()){
+export function chooseRole(role,newbie,at=Date.now(),roomKind=null){
  if(!Object.hasOwn(ROLES,role))throw Error('请选择拆弹或投蛋岗位。');
- return {version:1,day:beijingDay(at),role,books:{...ROLES[role].books},tutorialPending:Boolean(newbie),updatedAt:at};
+ return {version:2,day:beijingDay(at),role,books:{...ROLES[role].books},tutorialPending:Boolean(newbie),updatedAt:at,...(['angel','devil'].includes(roomKind)?{roomKind}:{})};
 }
 export function newestProfile(remote,local){
  const a=validProfile(remote),b=validProfile(local);return a&&(!b||a.updatedAt>=b.updatedAt)?a:b;
 }
 const TUTORIAL_HELP='<p>有不会或不懂的地方，可以在「设置」里点击「查看新手教程」再看一次，也可以加微信 <strong>L2385434375</strong> 询问，或者给 <strong>13480041761</strong> 发短信。</p>';
+const ROOM_START='<p>选择天使或恶魔后，默认进入北京时间今天对应的大群。群账本由成员共同使用。</p><p>点击顶部群名称，可查看所有成员和岗位；每个成员都能确认后移出其他成员，请核对姓名。</p><p>顶部「组队/加入组队」可以切回个人或以前的自建群。「不加入任何群聊」保留进入前正在使用的账本。</p>';
+const ROOM_COMPARE='<p>点击「今日对账」查看今日第一笔到现在的放蛋和销售匹配，包括疑似问题时段。</p><p>销售可以乱序或晚补记，补齐后会重新匹配。相近名称会挨在一起，可手动合并比对。</p><p>前后对应用于缩小核对时间；重复品类可能有多个候选。提示需核实，不代表已经确定有人放多或漏记。</p>';
+const ROOM_END='<p>每天有新的天使和恶魔大群，选择岗位后进入当天的群。个人和自建群的数据仍保留，切换账本不清空数量。</p><p>如需更换岗位，点设置里的「切换岗位」，确认后重新加载权限。离开大群、切回个人或普通自建群后，可在设置自由开启其他功能。</p>'+TUTORIAL_HELP;
+export function tutorialFor(role,daily=false){
+ if(!daily)return TUTORIALS[role];
+ const base=TUTORIALS[role];
+ if(role==='dismantle')return [
+  {title:'今天的大群与成员',page:'count',target:'.count-scope-actions',body:ROOM_START},
+  {title:'拆弹岗位负责哪些记录',page:'count',target:'.count-topbar',body:'<p>在天使或恶魔大群中，拆弹岗位负责销售和拆弹库存。</p><p><strong>不能修改放蛋记录，也不能查看接下来放蛋的推荐顺序。</strong>在大群设置中无法开启放蛋；今日匹配和待核实情况仍可查看。</p>'},
+  base[1],base[2],base[3],
+  {title:'今日匹配与疑似时段',page:'count',target:'.reconcile-status',body:ROOM_COMPARE},
+  {title:'两种库存分别清点',page:'count',target:'.count-topbar',body:'<p>拆弹岗位的库存和投蛋岗位的库存是两本独立账，即使同属天使或恶魔大群也不互通。</p><p>你在这里修改的是拆弹库存；销售与库存绑定也只影响拆弹岗位的这本库存。</p>'},
+  {title:'切换岗位与收工核对',page:'settings',target:'.role-settings',body:'<p>销售页的一键复制取当前销售数量，库存页复制当前库存。到「历史」核对操作，到「统计」查看时段，按分钟时可用滑块选择小时。</p>'+ROOM_END}
+ ];
+ return [
+  {title:'今天的大群与成员',page:'egg',target:'.workspace-bar',body:ROOM_START},
+  {title:'投蛋岗位负责哪些记录',page:'egg',target:'.egg-wrap',body:'<p>在天使或恶魔大群中，投蛋岗位负责放蛋、比例和推荐。</p><p><strong>不能修改销售和拆弹库存记录，在设置里也无法开启销售。</strong>仍可查看今日匹配和待核实情况。</p>'},
+  base[1],base[2],
+  {title:'本轮顺序与进度',page:'egg',target:'.egg-reco',body:base[3].body+base[4].body},
+  {title:'今日匹配与疑似时段',page:'egg',target:'.reconcile-status',body:ROOM_COMPARE},
+  {title:'可选的投蛋库存清点',page:'settings',target:'[data-book="stock"]',body:'<p><strong>投蛋库存默认关闭。</strong>需要下班前清点时，到「设置 → 启用的功能」打开库存。</p><p>这本库存只用于独立记数，不自动扣减，不联动放蛋或销售，也不与同群拆弹岗位的库存互通。</p><p>关闭功能不会删除已经记录的库存。</p>'},
+  {title:'切换岗位与收工核对',page:'settings',target:'.role-settings',body:'<p>放蛋页「查看总数」能看每种物品累计数量；「一键复制」可选当前轮进度或累计总数。历史可核对操作，统计可查看时段。独立库存页复制的是当前清点数量。</p>'+ROOM_END}
+ ];
+}
 export const TUTORIALS={
  dismantle:[
   {title:'先确认记在哪本账',page:'count',target:'.count-scope-actions',body:'<p>一个人记，选择「个人」；几个人一起记，点击「组队/加入组队」。</p><p>加入群后，成员共同使用群账本。<strong>操作前看一下顶部名称，确认当前是个人还是群。</strong></p>'},

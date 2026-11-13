@@ -35,6 +35,27 @@ test('a rejected role preference update preserves the previous confirmed prefere
  await assert.rejects(a.savePreferences(chooseRole('place',true)),/没有保存成功/);assert.equal(a.preferences,null);assert.equal(a.readOnly,false);
  a.channel?.close();
 });
+test('an old read cannot restore a stale revision after a successful save',async()=>{
+ const f=fixture();let release,seen,hold=false;const gate=new Promise(r=>release=r),started=new Promise(r=>seen=r);
+ const a=f.make({fetcher:async(url,options)=>{const response=await f.fetcher(url,options);if(hold&&url.includes('tally_ledgers?')){hold=false;seen();await gate;}return response;}});await a.init();
+ hold=true;const read=a.reload();await started;await a.commit(s=>C.change(s.sales,s.sales.items[0].id,1));release();await read;
+ assert.equal(a.cloudRevision,1);assert.equal(C.total(a.state.sales),1);await a.commit(s=>C.change(s.sales,s.sales.items[0].id,1));assert.equal(C.total(a.state.sales),2);a.channel?.close();
+});
+test('a daily save accepts a validated role projection after an opposite-role global revision advance',async()=>{
+ const f=fixture();const a=f.make({fetcher:async(url,options)=>{
+  if(url.endsWith('rpc/tally_team_save')){const body=JSON.parse(options.body),payload={...body.p_snapshot,revision:2,_dailyRoom:{...body.p_snapshot._dailyRoom,editRevision:1}};return Response.json({revision:2,payload,updated_at:new Date().toISOString()});}
+  return f.fetcher(url,options);
+ }});await a.init();a.workspace={id:'team',daily_kind:'angel'};a.state._dailyRoom={role:'place',editRevision:0,stockEnabled:true};
+ await a.commit(s=>C.change(s.stock,s.stock.items[0].id,1));assert.equal(a.cloudRevision,2);assert.equal(a.state._dailyRoom.editRevision,1);assert.equal(C.total(a.state.stock),1);a.channel?.close();
+});
+test('a known daily-role denial reloads permissions without retrying the rejected write',async()=>{
+ const f=fixture();let writes=0;const a=f.make({fetcher:async(url,options)=>{
+  if(url.endsWith('rpc/tally_team_save')){writes++;return Response.json({message:'TALLY_DAILY_FORBIDDEN'},{status:400});}
+  if(url.endsWith('rpc/tally_team_read'))return Response.json({payload:a.state,revision:0,updated_at:new Date().toISOString()});
+  return f.fetcher(url,options);
+ }});await a.init();a.workspace={id:'team',daily_kind:'angel'};a.state._dailyRoom={role:'dismantle',editRevision:0};
+ await assert.rejects(a.commit(s=>C.change(s.sales,s.sales.items[0].id,1)),/当前岗位/);assert.equal(writes,1);assert.equal(a.readOnly,false);assert.equal(C.total(a.state.sales),0);a.channel?.close();
+});
 test('saved egg recommendation shares the exact sequence through cloud reload and advances atomically with a placement',async()=>{
  const f=fixture(),a=f.make();await a.init();
  await a.commit(s=>{const egg=C.ensureEgg(s);[['甲',8],['乙',6],['丙',1],['丁',1]].forEach(([name,ratio])=>C.eggAddItem(egg,name,ratio));egg.recommendation=C.eggCreatePlan(egg);});
