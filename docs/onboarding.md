@@ -11,3 +11,5 @@ Authenticated Auth metadata tally_onboarding is display preference only: version
 See daily-rooms.md for permission/read/write contracts and daily-reconciliation.md for the order-independent comparison algorithm.
 
 The comparison tutorial now directs users to bottom navigation 匹配比对, select and connect both columns (including many-to-one), handle all categories, then confirm to view today’s results. Daily placement labels remain personal while group quantities are shared.
+
+After completing or skipping a tutorial, a separate scrollable 作者的话 dialog presents the user-authored guidance, ordered as location and shared records → dismantle → placement → item matching → settings and help. It retains the informal tone and support contacts; algorithm guarantees are expressed as best efforts. It dismisses without changing counts or team membership. Experienced role choices still enter directly. Navigation defaults now place matching immediately after history; saved legacy layouts migrate once, then user rearrangement remains possible. Matching refreshes on entry and invalidates cache on item ID/name changes independently of quantity revision.

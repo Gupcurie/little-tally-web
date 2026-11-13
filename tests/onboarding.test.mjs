@@ -36,3 +36,9 @@ test('daily profiles retain the outside feature choices and both daily tutorials
  for(const role of ['dismantle','place']){const tutorial=tutorialFor(role,true);assert.equal(tutorial.length,8);assert.match(tutorial.map(e=>e.body).join(''),/不加入任何群聊/);assert.match(tutorial.at(-1).body,/L2385434375/);}
  assert.match(tutorialFor('place',true).map(e=>e.body).join(''),/投蛋库存默认关闭/);
 });
+import {AUTHOR_NOTE} from '../dist/onboarding.js';
+test('author note preserves role, matching and support guidance without promising impossible sequences',()=>{
+ assert.ok(AUTHOR_NOTE.indexOf('天使集装箱')<AUTHOR_NOTE.indexOf('拆弹的小伙伴'));
+ for(const text of ['销售功能和库存功能','红娃衣和黑娃衣','手动加减库存','L2385434375','13480041761'])assert.ok(AUTHOR_NOTE.includes(text));
+ assert.ok(AUTHOR_NOTE.includes('尽量'));assert.ok(AUTHOR_NOTE.includes('还是可能重复'));assert.ok(!AUTHOR_NOTE.includes('每一件物品前后都不重复'));
+});

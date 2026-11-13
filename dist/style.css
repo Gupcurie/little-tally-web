@@ -377,3 +377,5 @@ button.egg-reco-main{align-self:stretch;text-align:left;background:transparent;c
 .match-groups{font-size:12px;color:#825162;margin:15px 0}.match-groups summary{cursor:pointer;padding:9px 0}.match-group-row{display:flex;align-items:center;gap:8px;padding:8px 0;border-bottom:1px solid #eee1e5}.match-group-row>span{flex:1;min-width:0;overflow-wrap:anywhere;font-size:11px;line-height:1.7}
 .match-confirm{width:100%;margin-top:10px}.matching-page .reconcile-location{background:#fff;padding:10px;border-radius:8px}
 @media(max-width:360px){.bottom-nav button span{font-size:9px}.match-column-titles,.match-band{grid-template-columns:minmax(0,1fr) 28px minmax(0,1fr)}.match-node{font-size:11px;padding:7px 5px;gap:3px}.match-port{width:15px;height:15px;font-size:9px}}
+
+.author-note h3{font-size:15px;margin:22px 0 9px;color:var(--ink)}.author-note-close{position:sticky;bottom:0;margin-top:18px;box-shadow:0 -6px 18px #fff;}

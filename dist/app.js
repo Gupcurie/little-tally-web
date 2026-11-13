@@ -8,7 +8,7 @@ import {installItemDrag} from './reorder.js';
 import {startReconciliation} from './reconcile.js';
 import {reconcileDaily,dailyMarkup,aliasControls,mergeAliases,validAliases,dayBounds} from './reconcile-daily.js';
 import {matchingItems,validMatching,coverage,prepareMatching,connectMatching,soloMatching,mappingMarkup,drawMatchingLines} from './matching.js';
-import {ROLES,TUTORIALS,tutorialFor,chooseRole,newestProfile,validProfile,beijingDay} from './onboarding.js';
+import {ROLES,TUTORIALS,AUTHOR_NOTE,tutorialFor,chooseRole,newestProfile,validProfile,beijingDay} from './onboarding.js';
 
 const icons={
  count:'<rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/>',
@@ -32,9 +32,9 @@ const onboarding=document.createElement('dialog');onboarding.id='onboarding';onb
 icons.match='<path d="M5 6h4m6 0h4M5 18h4m6 0h4M9 6c4 0 2 12 6 12M9 18c4 0 2-12 6-12"/><circle cx="4" cy="6" r="2"/><circle cx="20" cy="6" r="2"/><circle cx="4" cy="18" r="2"/><circle cx="20" cy="18" r="2"/>';
 icons.egg='<path d="M12 3c3.6 0 6.5 4.4 6.5 9.2 0 4.4-2.9 8.3-6.5 8.3S5.5 16.6 5.5 12.2C5.5 7.4 8.4 3 12 3z"/><path d="M9.5 9.5c.6-1.2 1.5-2 2.5-2"/>';
 const TAB_LABELS={count:'记数',egg:'放蛋',history:'历史',stats:'统计',ratio:'比例',match:'匹配比对',settings:'设置'};
-const DEFAULT_TABS=['count','egg','history','stats','ratio','match','settings'];
-const loadTabs=()=>{try{const raw=JSON.parse(localStorage.getItem('little-tally-tabs')||'null');if(Array.isArray(raw)){const kept=[...new Set(raw.filter(k=>DEFAULT_TABS.includes(k)))];if(!kept.includes('match'))kept.splice(Math.max(0,kept.indexOf('settings')),0,'match');for(const k of DEFAULT_TABS)if(!kept.includes(k))kept.push(k);return kept;}}catch{}return DEFAULT_TABS.slice();};
-const saveTabs=tabs=>{try{localStorage.setItem('little-tally-tabs',JSON.stringify(tabs));}catch{}};
+const DEFAULT_TABS=['count','egg','history','match','stats','ratio','settings'];
+const loadTabs=()=>{try{const raw=JSON.parse(localStorage.getItem('little-tally-tabs')||'null');if(Array.isArray(raw)){const kept=[...new Set(raw.filter(k=>DEFAULT_TABS.includes(k)))];if(!kept.includes('match'))kept.splice(Math.max(0,kept.indexOf('history')+1),0,'match');if(localStorage.getItem('little-tally-tabs-version')!=='2'){kept.splice(kept.indexOf('match'),1);kept.splice(Math.max(0,kept.indexOf('history')+1),0,'match');localStorage.setItem('little-tally-tabs',JSON.stringify(kept));localStorage.setItem('little-tally-tabs-version','2');}for(const k of DEFAULT_TABS)if(!kept.includes(k))kept.push(k);return kept;}}catch{}return DEFAULT_TABS.slice();};
+const saveTabs=tabs=>{try{localStorage.setItem('little-tally-tabs',JSON.stringify(tabs));localStorage.setItem('little-tally-tabs-version','2');}catch{}};
 const loadEggMode=()=>{try{const raw=localStorage.getItem('little-tally-egg-mode');return raw===null?true:raw==='1';}catch{return true;}};
 const saveEggMode=value=>{try{localStorage.setItem('little-tally-egg-mode',value?'1':'0');}catch{}};
 const loadBooks=()=>{try{const raw=JSON.parse(localStorage.getItem('little-tally-books')||'null');if(raw&&typeof raw==='object')return {sales:raw.sales!==false,stock:raw.stock!==false,egg:raw.egg!==false};}catch{}return {sales:true,stock:true,egg:true};};
@@ -145,10 +145,11 @@ function showTutorial(role,step=0){
 function roleSettingsView(){return `<section class="panel role-settings"><h2>岗位与新手教程</h2><p class="hint">${dailyRoom()?'当前大群岗位：'+ROLES[dailyRoom().role].name+'。':roleProfile?'当前岗位：'+ROLES[roleProfile.outsideRole||roleProfile.role].name+'。':'选择岗位后，会设置对应的默认功能。'}切换岗位不修改账本数量。</p><button type="button" class="list-button" data-action="role-select">${icon('count')}<span>切换岗位</span>${icon('arrow')}</button><button type="button" class="list-button" data-action="tutorial-open">${icon('file')}<span>查看新手教程</span>${icon('arrow')}</button></section>`;}
 onboarding.addEventListener('cancel',event=>{event.preventDefault();if(roleBusy)return;if(onboarding.dataset.mode==='tutorial')finishTutorial().catch(showOnboardingError);else if(onboarding.dataset.required!=='1')closeOnboarding();});
 function showOnboardingError(err){const node=onboarding.querySelector('.onboarding-error');if(node)node.textContent=err.message||'没有保存成功，请重试。';}
+function showAuthorNote(){onboarding.dataset.mode='author';onboarding.dataset.required='0';onboarding.innerHTML=`<div class="tutorial-heading"><h2 id="onboarding-title">作者的话</h2></div><div class="tutorial-copy author-note">${AUTHOR_NOTE}</div><button type="button" class="primary-button author-note-close" data-onboard="author-close">看完了，开始记数</button>`;if(!onboarding.open)onboarding.showModal();onboarding.scrollTop=0;}
 async function finishTutorial(){
  if(roleBusy)return;roleBusy=true;onboarding.querySelectorAll('button').forEach(n=>n.disabled=true);
  const role=tutorialRole;
- try{if(roleProfile?.tutorialPending)await saveRoleProfile({...roleProfile,tutorialPending:false,updatedAt:Date.now()});closeOnboarding();if(role){state.page=ROLES[role].page;state.book=ROLES[role].book;history.replaceState(null,'','#'+state.page);}render();}
+ try{if(roleProfile?.tutorialPending)await saveRoleProfile({...roleProfile,tutorialPending:false,updatedAt:Date.now()});closeOnboarding();if(role){state.page=ROLES[role].page;state.book=ROLES[role].book;history.replaceState(null,'','#'+state.page);}render();showAuthorNote();}
  catch(err){showOnboardingError(err);onboarding.querySelectorAll('button').forEach(n=>n.disabled=false);}
  finally{roleBusy=false;}
 }
@@ -177,6 +178,7 @@ onboarding.addEventListener('click',async event=>{
  if(a==='next')showTutorial(tutorialRole,tutorialStep+1);
  if(a==='back')showTutorial(tutorialRole,tutorialStep-1);
  if(a==='finish')await finishTutorial();
+ if(a==='author-close'){closeOnboarding();render();}
  if(a==='cancel')closeOnboarding();
 });
 function animateEggRecommendation(){
@@ -639,6 +641,7 @@ async function copyCountReport(){
 }
 function installHelp(){const isIOS=/iPad|iPhone|iPod/.test(navigator.userAgent);showSheet('把拆弹专家放进口袋',`<p>添加到主屏幕后，就能像 App 一样从图标打开。</p><ol class="install-steps"><li>${isIOS?'请用 Safari 打开这个网页。':'在手机浏览器中打开这个网页。'}</li><li>${isIOS?'点击浏览器的“分享”按钮。':'打开浏览器菜单，选择“安装应用”或“添加到主屏幕”。'}</li><li>${isIOS?'选择“添加到主屏幕”，如有“作为网页 App 打开”请开启。':'确认名称为“拆弹专家”，完成添加。'}</li></ol><div class="soft-message">建议先添加再正式记数，并固定使用同一个入口。如果已有记录，请先在设置里导出备份，再在主屏幕版导入。</div><button class="primary-button" type="button" data-action="close-sheet">知道了</button>`);}
 function comparisonScope(){return JSON.stringify([localMode?'local':ledger.user?.id,ledger.workspace?.id||'personal',dayBounds().day,ledger.state.periodStartedAt]);}
+function matchingNameStamp(){return JSON.stringify(['sales','egg'].map(k=>(ledger.state[k]?.items||[]).map(i=>[i.id,i.name])));}
 function dailyComparisonData(){
  const scope=comparisonScope();if(reconciliationData?.scope!==scope)reconciliationData={scope,archives:[],loaded:false,loading:false,error:null,version:0};return reconciliationData;
 }
@@ -660,13 +663,13 @@ function reconciliationStatus(){
 }
 async function queueReconciliationStart(force=false){
  if(ledger.readOnly||ledger.loading||state.page!=='match'&&!dailyRoom()&&(!state.books.sales||!state.books.egg))return;
- const data=dailyComparisonData();if(data.loading||data.loaded&&data.revision===Number(ledger.cloudRevision??ledger.state.revision)&&!force)return;
+ const data=dailyComparisonData();if(data.loading||data.loaded&&data.revision===Number(ledger.cloudRevision??ledger.state.revision)&&data.names===matchingNameStamp()&&!force)return;
  if(!localMode&&!ledger.workspace&&ledger.cloudRevision===0&&state.page!=='match')return;
- data.loading=true;data.error=null;
+ data.loading=true;data.error=null;const names=matchingNameStamp();
  try{
   if(!localMode&&!ledger.workspace&&ledger.cloudRevision===0){if(eggPlanSyncTask)await eggPlanSyncTask.catch(()=>{});if(ledger.saving){data.loaded=false;return;}if(ledger.cloudRevision===0)await ledger.commit(()=>{});}
   const source=localMode?localMatchingSource():await ledger.matchingRead();if(reconciliationData!==data)return;
-  data.source=source;data.revision=Number(source.revision??ledger.cloudRevision);data.loaded=true;data.version++;
+  data.source=source;data.revision=Number(source.revision??ledger.cloudRevision);data.names=names;data.loaded=true;data.version++;
  }catch(err){if(reconciliationData===data){data.error=err.message||'今日记录读取失败';data.loaded=true;}}
  finally{data.loading=false;if(reconciliationData===data)render();}
 }
@@ -809,7 +812,7 @@ async function action(a,node){
  if(a==='sync-cloud'){await ledger.reload();render();toast('已读取当前账户最新的云端记录。');return;}
  if(a==='logout'){confirmSheet('退出当前账户？','云端记录会保留。本页面和当前账户的本机备用副本会清除，下次登录会重新读取云端记录。',async()=>{await ledger.logout();state.itemID=null;state.selection.clear();state.ratioValues=Object.create(null);state.ratioSelected.clear();closeSheet();render();},'退出登录');return;}
  if(a==='close-sheet'){closeSheet();return;}
- if(a==='page'){if(node.dataset.page==='match')matchingUI=null;if(state.page==='egg'&&['stats','history','ratio'].includes(node.dataset.page)&&!node.dataset.book)state.book='egg';if(node.dataset.book)state.book=node.dataset.book;state.page=node.dataset.page;state.itemID=null;state.eggItemID=null;state.eggSelecting=false;state.eggSelection.clear();state.keyword='';state.selection.clear();state.selecting=false;state.range=state.page==='history'?3:0;if(!['ratio','stats','history','match'].includes(state.page)&&state.book==='egg')state.book='sales';if(state.page==='ratio')loadRatio();history.replaceState(null,'','#'+state.page);render();window.scrollTo({top:0});return;}
+ if(a==='page'){if(node.dataset.page==='match'){matchingUI=null;dailyComparisonData().loaded=false;}if(state.page==='egg'&&['stats','history','ratio'].includes(node.dataset.page)&&!node.dataset.book)state.book='egg';if(node.dataset.book)state.book=node.dataset.book;state.page=node.dataset.page;state.itemID=null;state.eggItemID=null;state.eggSelecting=false;state.eggSelection.clear();state.keyword='';state.selection.clear();state.selecting=false;state.range=state.page==='history'?3:0;if(!['ratio','stats','history','match'].includes(state.page)&&state.book==='egg')state.book='sales';if(state.page==='ratio')loadRatio();history.replaceState(null,'','#'+state.page);render();window.scrollTo({top:0});return;}
  if(a==='book'){state.book=node.dataset.book;state.itemID=null;state.eggItemID=null;state.keyword='';state.selection.clear();state.selecting=false;state.ratioPlan=null;state.selectedHour=null;state.eggDraft=null;if(state.book!=='egg')loadRatio();render();return;}
  if(a==='install'){installHelp();return;}
  if(a==='detail'){state.itemID=id;render();window.scrollTo({top:0});return;}
@@ -946,7 +949,7 @@ fileInput.addEventListener('change',async()=>{const file=fileInput.files?.[0];if
  confirmSheet('恢复全部记录？',`备份包含两个账本，共 ${n} 条记录。会替换本机的全部记数和库存，原本机记录会另存为恢复副本。`,async()=>{await ledger.restoreState(backupReady);backupReady=null;state.itemID=null;loadRatio();render();toast('全部记录已恢复。');},'恢复两个账本');
  }else{const kind=restoreExpected,b=C.decodeBackup(text,kind);confirmSheet(`恢复${title(kind)}？`,`包含 ${b.items.length} 类物品、${b.records.length} 条记录。替换对应账本，另一个账本不受影响。`,async()=>{await mutateState(s=>C.replaceBoundBook(s,kind,b));state.itemID=null;loadRatio();render();toast('备份已恢复。');},'替换此账本');}}catch(err){toast(err.message||'无法读取这份备份。');}});
 sheet.addEventListener('click',event=>{if(event.target===sheet){const r=sheet.getBoundingClientRect();if(event.clientY<r.top||event.clientX<r.left||event.clientX>r.right)closeSheet();}});
-window.addEventListener('hashchange',()=>{const p=location.hash.slice(1);if(['count','egg','history','stats','ratio','match','settings'].includes(p)){if(p==='match'&&state.page!=='match')matchingUI=null;state.page=p;state.itemID=null;if(p==='ratio')loadRatio();render();}});
+window.addEventListener('hashchange',()=>{const p=location.hash.slice(1);if(['count','egg','history','stats','ratio','match','settings'].includes(p)){if(p==='match'&&state.page!=='match'){matchingUI=null;dailyComparisonData().loaded=false;}state.page=p;state.itemID=null;if(p==='ratio')loadRatio();render();}});
 window.addEventListener('pageshow',()=>{if(ledger.db&&!ledger.saving)ledger.reload().then(render).catch(()=>{});});
 document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible'&&ledger.db&&!ledger.saving)ledger.reload().then(render).catch(()=>{});});
 if(localMode&&ledger.channel)ledger.channel.onmessage=()=>{if(!ledger.saving)ledger.reload().then(()=>{render();toast('已同步本机另一页面的最新记录。');}).catch(()=>{});};
