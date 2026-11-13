@@ -25,6 +25,7 @@ const ledger=localMode?new BrowserLedger():new CloudLedger(cloudConfig);
 let state={page:['count','egg','history','stats','ratio','match','settings'].includes(location.hash.slice(1))?location.hash.slice(1):'egg',book:'sales',range:0,keyword:'',direction:0,historyLimit:80,selection:new Set(),selecting:false,itemID:null,ratioMode:'parts',ratioSelected:new Set(),ratioValues:Object.create(null),ratioPlan:null,ratioError:null,authMode:'login',baseID:'',selectedHour:null};
 let eggPlanSyncTimer,eggPlanSyncTask=null;
 let itemDrag=null,orderSaving=false,renderedDay=null,dragDeferred=false;
+let issueExpansion={scope:null,states:new Map()};
 let reconciliationTimer,comparisonCache=null,reconciliationData=null,matchingUI=null;
 let toastTimer,formSubmit=null,restoreExpected=null,backupReady=null;
 let roleAccount=null,roleProfile=null,roleRequired=false,roleBusy=false,roleQueued=false,tutorialRole=null,tutorialStep=0,featureScope=null;
@@ -53,6 +54,8 @@ function timeBadge(showTime=true){return ledger.savedAt?`${localMode?'本机已�
 function render(){
  if(itemDrag?.engaged){dragDeferred=true;return;}dragDeferred=false;
  renderedDay=C.day(Date.now());
+ const previousMatch=main.querySelector('[data-match-scope]'),previousMatchScope=previousMatch?.dataset.matchScope,previousMatchScroll=window.scrollY;
+ if(previousMatch){if(issueExpansion.scope!==previousMatchScope)issueExpansion={scope:previousMatchScope,states:new Map()};previousMatch.querySelectorAll('[data-issue-key]').forEach(n=>issueExpansion.states.set(n.dataset.issueKey,n.open));}
  const previousChart=main.querySelector('.activity-scroll');
  const previousChartScroll=previousChart?.scrollLeft;
  const previousGrid=main.querySelector('.count-dashboard .item-grid');
@@ -76,6 +79,7 @@ function render(){
   catch(err){state.eggItemID=null;state.page='count';main.innerHTML=countView();toast('这个页面刚刚没打开，已回到记数页。');}
  }
  if((localMode||ledger.signedIn)&&!ledger.loading){const scope=document.createElement('div');scope.className='workspace-bar';scope.innerHTML=workspaceBar();if(state.page==='settings')main.insertAdjacentHTML('afterbegin',roleSettingsView()+daySettingsView());if(!main.firstElementChild?.classList.contains('count-dashboard'))main.prepend(scope);}
+ const currentMatch=main.querySelector('[data-match-scope]');if(currentMatch){if(issueExpansion.scope!==currentMatch.dataset.matchScope)issueExpansion={scope:currentMatch.dataset.matchScope,states:new Map()};currentMatch.querySelectorAll('[data-issue-key]').forEach(n=>{if(issueExpansion.states.has(n.dataset.issueKey))n.open=issueExpansion.states.get(n.dataset.issueKey);});if(previousMatchScope===currentMatch.dataset.matchScope)window.scrollTo({top:previousMatchScroll,behavior:'instant'});}
  layoutVars();fitItemGrid();
  const currentDashboard=main.querySelector('.count-dashboard');
  if(previousScroll&&currentDashboard?.dataset.scope===previousScope){const grid=currentDashboard.querySelector('.item-grid');if(grid)grid.scrollTop=previousScroll;}
@@ -692,7 +696,7 @@ function matchingView(){
  const data=dailyComparisonData();if(data.error)return `<h1 class="page-title">匹配比对</h1><p class="sheet-error">读取不完整：${e(data.error)}</p><button class="primary-button" data-action="match-refresh">重新读取</button>`;
  if(!data.source)return '<h1 class="page-title">匹配比对</h1><p class="hint">正在读取两侧物品和今日记录…</p>';
  const ui=ensureMatchingUI(),items=matchingItems(data.source);
- return `<section class="matching-page"><div class="heading-row"><h1 class="page-title">${ui.stage==='setup'?'物品匹配':'今日匹配比对'}</h1><button type="button" class="small-button" data-action="match-refresh" ${data.loading?'disabled aria-busy="true"':''}>${data.loading?'正在刷新…':'刷新数据'}</button></div><p class="hint matching-refresh-status" role="status">${data.loading?'正在读取最新物品名称和今日记录…':data.updatedAt?'刷新完成 · 最近更新 '+new Date(data.updatedAt).toLocaleTimeString('zh-CN',{timeZone:'Asia/Shanghai',hour12:false}):''}</p>${ui.error?`<p class="sheet-error" role="alert">${e(ui.error)}</p>`:''}${ui.stage==='setup'?mappingMarkup(items,ui.draft,ui.selection):`<button type="button" class="small-button" data-action="match-edit">修改物品连线</button>${dailyMarkup(reconciliationResult())}`}</section>`;
+ return `<section class="matching-page" data-match-scope="${e(data.scope+'|'+data.source.hash)}"><div class="heading-row"><h1 class="page-title">${ui.stage==='setup'?'物品匹配':'今日匹配比对'}</h1><button type="button" class="small-button" data-action="match-refresh" ${data.loading?'disabled aria-busy="true"':''}>${data.loading?'正在刷新…':'刷新数据'}</button></div><p class="hint matching-refresh-status" role="status">${data.loading?'正在读取最新物品名称和今日记录…':data.updatedAt?'刷新完成 · 最近更新 '+new Date(data.updatedAt).toLocaleTimeString('zh-CN',{timeZone:'Asia/Shanghai',hour12:false}):''}</p>${ui.error?`<p class="sheet-error" role="alert">${e(ui.error)}</p>`:''}${ui.stage==='setup'?mappingMarkup(items,ui.draft,ui.selection):`<button type="button" class="small-button" data-action="match-edit">修改物品连线</button>${dailyMarkup(reconciliationResult())}`}</section>`;
 }
 function showReconciliation(){
  if(state.bundle){toast('请先确认或取消这组多蛋购买。');return;}

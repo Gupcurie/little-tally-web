@@ -79,7 +79,34 @@ function tightBracket(anchors,position,cache){
  }
  cache.set(lo,best);return best;
 }
-function rankLocations(source,other,key,anchors,deficit,buffer,brackets){
+function partialAnchors(source,other){
+ const out=[];
+ for(const [key,group] of source.groups){
+  const a=group.runs.filter(r=>r.quantity),b=other.groups.get(key)?.runs.filter(r=>r.quantity)||[];
+  const na=a.reduce((n,r)=>n+r.quantity,0),nb=b.reduce((n,r)=>n+r.quantity,0);if(!na||!nb)continue;
+  // Quantile references use compressed quantities, including batch registrations.
+  // Unequal totals cannot prove individual identity; these are fallback references only.
+  const n=Math.min(8,na,nb);let ai=0,bi=0,ap=0,bp=0;
+  for(let j=0;j<n;j++){
+   const x=Math.floor((j+.5)*na/n),y=Math.floor((j+.5)*nb/n);
+   while(ai<a.length-1&&ap+a[ai].quantity<=x)ap+=a[ai++].quantity;
+   while(bi<b.length-1&&bp+b[bi].quantity<=y)bp+=b[bi++].quantity;
+   out.push({source:{...a[ai],pos:a[ai].pos+x-ap},other:{...b[bi],pos:b[bi].pos+y-bp},estimated:true});
+  }
+ }
+ return out;
+}
+function fallbackWindow(source,run,key,references,cache,index){
+ const pair=tightBracket(references,run.pos,cache);
+ const ref=a=>a?{name:a.source.name,at:a.source.at,otherAt:a.other.at}:null;
+ if(pair)return {kind:'partial',from:pair.left.source.at,to:pair.right.source.at,otherFrom:pair.left.other.at,otherTo:pair.right.other.at,before:ref(pair.left),after:ref(pair.right)};
+ const near=nearestAnchors(references,run.pos),left=near.left.at(-1),right=near.right[0];
+ if(left||right)return {kind:left&&right?'crossed':'one-sided',from:left?.source.at??run.at,to:right?.source.at??run.at,before:ref(left),after:ref(right)};
+ const position=index.get(run),before=source.runs[position-1],after=source.runs[position+1];
+ if(before||after)return {kind:'neighborhood',from:before?.at??run.at,to:after?.at??run.at,before:before?{name:before.name,at:before.at}:null,after:after?{name:after.name,at:after.at}:null};
+ return null;
+}
+function rankLocations(source,other,key,anchors,deficit,buffer,brackets,soft=[]){
  const a=source.groups.get(key)?.runs.filter(r=>r.quantity)||[],b=other.groups.get(key)?.runs.filter(r=>r.quantity)||[];
  const scores=new Map(a.map(r=>[r,0]));
  const na=a.reduce((n,r)=>n+r.quantity,0),nb=b.reduce((n,r)=>n+r.quantity,0);
@@ -97,13 +124,15 @@ function rankLocations(source,other,key,anchors,deficit,buffer,brackets){
   for(let i=0;i<na;i++){let best=Infinity;for(let j=0;j<=nb;j++)best=Math.min(best,forward[i*width+j]+backward[(i+1)*width+j]);scores.set(aa[i].run,Math.min(scores.get(aa[i].run),Math.max(0,best-optimum)));}
   ranked=true;
  }
+ const available=[...anchors,...soft].filter(a=>a.source.key!==key).sort((a,b)=>a.source.pos-b.source.pos),stride=Math.max(1,Math.ceil(available.length/256));
+ const references=available.filter((_,i)=>i%stride===0),fallbackCache=new Map(),index=new Map(source.runs.map((r,i)=>[r,i]));
  const locations=a.map(run=>{
   const pair=tightBracket(anchors,run.pos,brackets);
   return {at:run.at,recordId:run.recordId,quantity:Math.min(run.quantity,deficit),position:run.pos+1,
    from:pair?.left.source.at??run.at,to:pair?.right.source.at??run.at,
    before:pair?{name:pair.left.source.name,at:pair.left.source.at,otherAt:pair.left.other.at}:null,
    after:pair?{name:pair.right.source.name,at:pair.right.source.at,otherAt:pair.right.other.at}:null,
-   bounded:Boolean(pair),estimated:Boolean(pair&&(pair.left.estimated||pair.right.estimated)),score:scores.get(run),ranked};
+   bounded:Boolean(pair),estimated:Boolean(pair&&(pair.left.estimated||pair.right.estimated)),window:pair?null:fallbackWindow(source,run,key,references,fallbackCache,index),score:scores.get(run),ranked};
  }).sort((a,b)=>a.score-b.score||a.to-a.from-(b.to-b.from)||a.at-b.at);
  return {locations:locations.slice(0,20),candidateCount:locations.length,ambiguous:na>deficit&&locations.length>1,ranked};
 }
@@ -124,19 +153,30 @@ export function reconcileDaily(eggBooks,salesBooks,{now=Date.now(),aliases=[],li
  const capacity=Math.max(0,1024-certain.length),stride=Math.max(1,Math.ceil(estimated.length/(capacity||1)));
  const anchors=[...certain,...estimated.filter((_,i)=>capacity&&i%stride===0)].sort((a,b)=>a.source.pos-b.source.pos);
  const reverse=anchors.map(a=>({source:a.other,other:a.source,estimated:a.estimated})).sort((a,b)=>a.source.pos-b.source.pos);
- const eggBrackets=new Map(),salesBrackets=new Map();
- const issues=rows.filter(row=>row.difference!==0).map(row=>({key:row.key,name:row.name,eggs:row.eggs,sales:row.sales,quantity:Math.abs(row.difference),side:row.difference>0?'egg':'sales',...rankLocations(row.difference>0?placed:sold,row.difference>0?sold:placed,row.key,row.difference>0?anchors:reverse,Math.abs(row.difference),buffer,row.difference>0?eggBrackets:salesBrackets)}));
+ const eggBrackets=new Map(),salesBrackets=new Map(),soft=partialAnchors(placed,sold),reverseSoft=soft.map(a=>({source:a.other,other:a.source,estimated:true}));
+ const issues=rows.filter(row=>row.difference!==0).map(row=>({key:row.key,name:row.name,eggs:row.eggs,sales:row.sales,quantity:Math.abs(row.difference),side:row.difference>0?'egg':'sales',...rankLocations(row.difference>0?placed:sold,row.difference>0?sold:placed,row.key,row.difference>0?anchors:reverse,Math.abs(row.difference),buffer,row.difference>0?eggBrackets:salesBrackets,row.difference>0?soft:reverseSoft)}));
  const total=field=>rows.reduce((n,row)=>n+row[field],0),waiting=rows.reduce((n,row)=>n+Math.max(0,row.difference),0),unmatched=rows.reduce((n,row)=>n+Math.max(0,-row.difference),0);
  return {version:2,...bounds,rows:sortSimilarRows(rows),issues,buffer,eggs:total('eggs'),sales:total('sales'),matched:total('matched'),waiting,unmatched,difference:total('difference'),overBuffer:waiting>buffer,correction:total('correction'),first:Math.min(placed.first??Infinity,sold.first??Infinity),status:unmatched||waiting>buffer||total('correction')?'review':waiting?'pending':'ok'};
 }
 const clock=at=>new Date(at).toLocaleTimeString('zh-CN',{timeZone:'Asia/Shanghai',hour12:false});
+function fallbackMarkup(location){
+ const w=location.window;if(!w)return '<p>暂无其他可用记录，只能查看这条登记时间；无法据此确定实际出错时间。</p>';
+ const reason={partial:'参考了其他品类的部分数量对应或批量登记；同类出现位置可能不同，这个范围是估计，不能确认具体漏记的是哪一件。','one-sided':'只有单侧跨账本参考，另一端采用本条登记时间；这是优先核对的本侧登记范围，不能排除范围外晚补记。',crossed:'前后参考在另一侧顺序交错，不能组成可靠配对；这里展示本侧邻近参考范围，不代表异常一定发生在其中。',neighborhood:'没有跨账本对应参考，这里仅展示相邻登记范围，便于翻查现场记录，不能当作已匹配出的异常时段。'}[w.kind];
+ const reference=(label,r)=>r?`${label}：${esc(r.name)}（本侧 ${clock(r.at)}${Number.isFinite(r.otherAt)?'／对侧 '+clock(r.otherAt):''}）<br>`:'';
+ return `<p>${reason}</p><p>${reference('前',w.before)}${reference('后',w.after)}${Number.isFinite(w.otherFrom)?`对侧参考登记：${clock(w.otherFrom)}–${clock(w.otherTo)}<br>`:''}登记时间不等于实际投蛋或兑换时间，晚补记时需要扩大核对。</p>`;
+}
+function locationHeading(location){
+ if(location.bounded)return (location.estimated?'估计核对 ':'建议核对 ')+clock(location.from)+'–'+clock(location.to);
+ if(location.window){const w=location.window;return (w.kind==='partial'?'估计核对 ':w.kind==='neighborhood'?'登记邻域 ':'本侧参考范围 ')+clock(w.from)+'–'+clock(w.to);}
+ return '登记时间 '+clock(location.at);
+}
 export function dailyMarkup(result){
  const rows=result.rows.map(row=>`<tr><th>${esc(row.name)}</th><td>${row.eggs}</td><td>${row.sales}</td><td>${row.matched}</td><td class="${row.difference?'difference':''}">${row.difference>0?'+':''}${row.difference}</td></tr>`).join('');
  return `<p class="reconcile-summary">今日放蛋 ${result.eggs} · 今日销售 ${result.sales} · 已匹配 ${result.matched}</p><p>尚未对应销售 ${result.waiting} 个 · 销售多于放蛋 ${result.unmatched} 个</p><p class="hint">${esc(result.day)} ${Number.isFinite(result.first)?clock(result.first)+' 第一笔变动起':'暂无变动'}，截至 ${clock(result.end)}（北京时间）。允许销售乱序和晚补记；20 个为整体提醒值。相近名称只排序，合并需手动确认。</p>
 
  ${result.correction?'<p class="reconcile-notice">今日有减回到此前底数的调整，请核对起始数量；负数会如实显示。</p>':''}
  ${result.issues.length?'<h3>疑似问题时段</h3><p class="hint">以下为登记线索，不能确定实际多投或漏记。重复物品列出候选位置；前后记录用于缩小核对范围，不保证真实兑换按此顺序发生。</p>':''}
- ${result.issues.map(issue=>`<details class="reconcile-issue" data-issue-key="${esc(issue.key)}" ${result.issues.length===1?'open':''}><summary>${esc(issue.name)} · ${issue.side==='egg'?'尚未对应销售':'销售多于放蛋'} ${issue.quantity} 个</summary><p>今日放蛋 ${issue.eggs}，销售 ${issue.sales}。${issue.ambiguous?'存在多个可能位置，优先核对下列范围；其他候选同样可能。':'登记候选如下。'}${issue.ranked?'优先级结合前后对应和登记位置估算。':''}</p>${issue.locations.length?issue.locations.map((location,i)=>`<div class="reconcile-location"><strong>${i+1}. ${location.bounded?(location.estimated?'估计核对 ':'建议核对 ')+clock(location.from)+'–'+clock(location.to):'登记时间 '+clock(location.at)}</strong><p>${issue.side==='egg'?'放蛋':'销售'}登记 ${clock(location.at)} · 第 ${location.position} 项 · 本条最多涉及 ${location.quantity} 个</p>${location.bounded?`<p>前：${esc(location.before.name)}（本侧 ${clock(location.before.at)}／对侧 ${clock(location.before.otherAt)}）<br>后：${esc(location.after.name)}（本侧 ${clock(location.after.at)}／对侧 ${clock(location.after.otherAt)}）${location.estimated?'<br>前后含重复品类，范围根据同类出现次序推测，可能需要扩大检查。':''}</p>`:'<p>缺少可确认的前后对应，仅能定位到登记记录。</p>'}</div>`).join(''):'<p>涉及今日之前的底数调整，无法定位到当天新增记录。</p>'}${issue.candidateCount>20?`<p>共 ${issue.candidateCount} 处候选，当前展示前 20 处。</p>`:''}</details>`).join('')}
+ ${result.issues.map(issue=>`<details class="reconcile-issue" data-issue-key="${esc(issue.key)}" ${result.issues.length===1?'open':''}><summary>${esc(issue.name)} · ${issue.side==='egg'?'尚未对应销售':'销售多于放蛋'} ${issue.quantity} 个</summary><p>今日放蛋 ${issue.eggs}，销售 ${issue.sales}。${issue.ambiguous?'存在多个可能位置，优先核对下列范围；其他候选同样可能。':'登记候选如下。'}${issue.ranked?'优先级结合前后对应和登记位置估算。':''}</p>${issue.locations.length?issue.locations.map((location,i)=>`<div class="reconcile-location"><strong>${i+1}. ${locationHeading(location)}</strong><p>${issue.side==='egg'?'放蛋':'销售'}登记 ${clock(location.at)} · 第 ${location.position} 项 · 本条最多涉及 ${location.quantity} 个</p>${location.bounded?`<p>前：${esc(location.before.name)}（本侧 ${clock(location.before.at)}／对侧 ${clock(location.before.otherAt)}）<br>后：${esc(location.after.name)}（本侧 ${clock(location.after.at)}／对侧 ${clock(location.after.otherAt)}）${location.estimated?'<br>前后含重复品类，范围根据同类出现次序推测，可能需要扩大检查。':''}</p>`:fallbackMarkup(location)}</div>`).join(''):'<p>涉及今日之前的底数调整，无法定位到当天新增记录。</p>'}${issue.candidateCount>20?`<p>共 ${issue.candidateCount} 处候选，当前展示前 20 处。</p>`:''}</details>`).join('')}
  <h3>今日数量明细</h3>
  <div class="reconcile-scroll"><table class="reconcile-table"><thead><tr><th>物品</th><th>放蛋</th><th>销售</th><th>匹配</th><th>放蛋−销售</th></tr></thead><tbody>${rows||'<tr><td colspan="5">今天还没有数量变动</td></tr>'}</tbody></table></div>`;
 }

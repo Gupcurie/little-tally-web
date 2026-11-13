@@ -67,3 +67,37 @@ test('ordinary repeated balanced items supply explicitly estimated ranges, with 
  const result=reconcileDaily(book(['鼠标垫','娃衣','支架','贴纸','鼠标垫','娃衣','支架','贴纸']),book(['支架','鼠标垫','贴纸','鼠标垫','支架','娃衣','贴纸'],60000),{now});
  const issue=result.issues.find(i=>i.name==='娃衣');assert.equal(issue.candidateCount,2);assert.equal(issue.ambiguous,true);assert.ok(issue.locations.some(l=>l.bounded&&l.estimated));assert.match(dailyMarkup(result),/前后含重复品类/);
 });
+
+test('partial counts in surrounding categories now provide an explicitly estimated fallback window',()=>{
+ const egg=book(['甲','甲','缺项','乙','乙']),sales=book(['甲','乙'],60000);
+ const result=reconcileDaily(egg,sales,{now}),location=result.issues.find(i=>i.name==='缺项').locations[0];
+ assert.equal(location.bounded,false);assert.equal(location.window.kind,'partial');
+ assert.ok(location.window.from<=location.at&&location.window.to>=location.at);assert.equal(location.window.before.name,'甲');assert.equal(location.window.after.name,'乙');
+ assert.match(dailyMarkup(result),/部分数量对应或批量登记/);assert.match(dailyMarkup(result),/这个范围是估计/);
+});
+
+test('balanced bulk registrations can bracket a missing category without expanding quantities',()=>{
+ const egg=book(['甲','缺项','乙']),sales=book(['甲','甲','乙','乙'],60000);egg.records[0].delta=2;egg.records[2].delta=2;
+ const result=reconcileDaily(egg,sales,{now}),location=result.issues[0].locations[0];
+ assert.equal(location.window.kind,'partial');assert.equal(location.window.from,egg.records[0].at);assert.equal(location.window.to,egg.records[2].at);assert.equal(result.matched,4);
+});
+
+test('single-sided references and crossed references remain context rather than confirmed matches',()=>{
+ const one=reconcileDaily(book(['甲','缺项']),book(['甲'],60000),{now}).issues[0].locations[0];
+ assert.equal(one.bounded,false);assert.equal(one.window.kind,'one-sided');assert.equal(one.window.to,one.at);
+ const crossed=reconcileDaily(book(['甲','缺项','乙']),book(['乙','甲'],60000),{now}).issues[0].locations[0];
+ assert.equal(crossed.window.kind,'crossed');assert.match(dailyMarkup(reconcileDaily(book(['甲','缺项','乙']),book(['乙','甲'],60000),{now})),/顺序交错/);
+});
+
+test('no shared categories offers only the actual registration neighborhood and retains all repeated candidates',()=>{
+ const result=reconcileDaily(book(['缺项','缺项','另项']),book(['完全不同'],60000),{now});
+ const issue=result.issues.find(i=>i.name==='缺项');assert.equal(issue.candidateCount,2);assert.equal(issue.ambiguous,false);
+ assert.ok(issue.locations.every(l=>!l.bounded&&l.window.kind==='neighborhood'));
+ assert.match(dailyMarkup(result),/没有跨账本对应参考/);
+ const isolated=reconcileDaily(book(['仅一条']),book([]),{now});assert.equal(isolated.issues[0].locations[0].window,null);assert.match(dailyMarkup(isolated),/无法据此确定实际出错时间/);
+});
+
+test('a suspect category cannot manufacture its own fallback anchors',()=>{
+ const result=reconcileDaily(book(['甲','甲','甲']),book(['甲','甲'],60000),{now});
+ assert.ok(result.issues[0].locations.every(l=>!l.bounded&&l.window.kind==='neighborhood'));assert.equal(result.issues[0].candidateCount,3);
+});
