@@ -1,4 +1,4 @@
-const VERSION='little-tally-shell-v27-role-tutorial';
+const VERSION='little-tally-shell-v28-tutorial-help';
 const ROOT=new URL('./',self.location).href;
 const ASSETS=['./','./index.html','./style.css','./app.js','./core.js','./operations.js','./reorder.js','./reconcile.js','./onboarding.js','./plan-random.js','./account.js','./connection.js','./storage.js','./cloud.js','./cloud-config.js','./vendor/supabase.js','./manifest.webmanifest','./assets/mars-floral.jpg','./assets/mars-identity.jpg','./icon.svg','./icon-192.png','./icon-512.png'];
 self.addEventListener('install',event=>{event.waitUntil((async()=>{const cache=await caches.open(VERSION);await cache.addAll(ASSETS);})());});
