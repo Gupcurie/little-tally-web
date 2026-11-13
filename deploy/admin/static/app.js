@@ -449,52 +449,42 @@ async function runAggregate(op) {
 }
 
 let comparing = false;
-const comparisonBaselines = new Map();
-function comparisonStorageKey() {
- return 'tally-admin-comparison-v1-' + ADMIN_SLOT + '-' + $('compare-egg').value + '-' + $('compare-sales').value;
-}
-function openComparison() {
- const ids=[...SELECTED];
- if(ids.length!==2)return;
+const comparisonAliases=new Map();
+let comparisonSnapshot=null;
+function comparisonStorageKey(){return 'tally-admin-comparison-v2-'+ADMIN_SLOT+'-'+$('compare-egg').value+'-'+$('compare-sales').value;}
+function readComparisonAliases(key){let saved=comparisonAliases.get(key);if(!saved)try{saved=JSON.parse(localStorage.getItem(key));}catch{}return Array.isArray(saved)?saved:[];}
+function openComparison(){
+ const ids=[...SELECTED];if(ids.length!==2)return;
  for(const control of ['compare-egg','compare-sales']){
-  $(control).textContent='';
-  for(const id of ids){
-   const account=ACCOUNTS.find(item=>item.id===id);
-   const option=el('option',null,account?.username||id);
-   option.value=id;$(control).appendChild(option);
-  }
+  $(control).textContent='';for(const id of ids){const account=ACCOUNTS.find(item=>item.id===id),option=el('option',null,account?.username||id);option.value=id;$(control).appendChild(option);}
  }
- $('compare-egg').value=ids[0];$('compare-sales').value=ids[1];
- $('compare-panel').hidden=false;
- refreshComparison();
+ $('compare-egg').value=ids[0];$('compare-sales').value=ids[1];$('compare-panel').hidden=false;refreshComparison();
 }
-async function refreshComparison(reset=false) {
- if(comparing)return;
- comparing=true;$('compare-refresh').disabled=true;$('compare-start').disabled=true;
- const eggId=$('compare-egg').value,salesId=$('compare-sales').value;
- const slot=ADMIN_SLOT,key=comparisonStorageKey();
- $('compare-result').textContent='正在读取…';
+async function renderComparison(data,key){
+ const model=await import('/reconcile-daily.js');if(key!==comparisonStorageKey())return;
+ const aliases=readComparisonAliases(key),result=model.reconcileDaily(data.egg_books,data.sales_books,{now:data.generated_at,aliases});
+ const target=$('compare-result');target.textContent='';target.appendChild(el('p',null,data.egg_name+' 的放蛋 → '+data.sales_name+' 的销售'));
+ const detail=el('div');detail.innerHTML=model.dailyMarkup(result)+model.aliasControls(result,aliases);target.appendChild(detail);
+}
+async function refreshComparison(){
+ if(comparing)return;comparing=true;$('compare-refresh').disabled=true;
+ const eggId=$('compare-egg').value,salesId=$('compare-sales').value,slot=ADMIN_SLOT,key=comparisonStorageKey();
+ comparisonSnapshot=null;$('compare-result').textContent='正在读取今日完整记录…';
  try{
   const data=await api('/api/compare',{method:'POST',body:JSON.stringify({egg_id:eggId,sales_id:salesId})});
-  if(slot!==ADMIN_SLOT||eggId!==$('compare-egg').value||salesId!==$('compare-sales').value)return;
-  const model=await import('/reconcile.js');
-  let saved=comparisonBaselines.get(key);
-  if(!saved)try{saved=JSON.parse(localStorage.getItem(key));}catch{}
-  if(reset||!saved||JSON.stringify(saved.periods)!==JSON.stringify(data.periods)){
-   saved={periods:data.periods,baseline:model.startReconciliation(data.egg,data.sales,data.generated_at)};
-   comparisonBaselines.set(key,saved);
-   try{localStorage.setItem(key,JSON.stringify(saved));}catch{}
-  }
-  const result=model.reconcile(data.egg,data.sales,saved.baseline);
-  const target=$('compare-result');target.textContent='';
-  target.appendChild(el('p',null,data.egg_name+' 的放蛋 → '+data.sales_name+' 的销售'));
-  target.appendChild(el('p','muted small','对账起点 '+fmtDate(saved.baseline.at)+' · 本次读取 '+fmtDate(data.generated_at)));
-  const detail=el('div');detail.innerHTML=model.reconciliationMarkup(result);target.appendChild(detail);
- }catch(error){$('compare-result').textContent='对账读取失败：'+error.message;}
- finally{comparing=false;$('compare-refresh').disabled=false;$('compare-start').disabled=false;
-  if(!$('compare-panel').hidden&&slot===ADMIN_SLOT&&(eggId!==$('compare-egg').value||salesId!==$('compare-sales').value))refreshComparison();
- }
+  if(slot!==ADMIN_SLOT||key!==comparisonStorageKey())return;comparisonSnapshot={data,key};await renderComparison(data,key);
+ }catch(error){$('compare-result').textContent='今日对账读取失败：'+error.message;}
+ finally{comparing=false;$('compare-refresh').disabled=false;if(!$('compare-panel').hidden&&slot===ADMIN_SLOT&&key!==comparisonStorageKey())refreshComparison();}
 }
+$('compare-result').addEventListener('click',async event=>{
+ const button=event.target.closest('[data-reconcile-merge],[data-reconcile-unmerge]');if(!button||!comparisonSnapshot||comparing)return;
+ const {data,key}=comparisonSnapshot;if(key!==comparisonStorageKey())return;
+ try{
+  const model=await import('/reconcile-daily.js');if(key!==comparisonStorageKey())return;
+  const current=readComparisonAliases(key),next=button.hasAttribute('data-reconcile-merge')?model.mergeAliases(current,$('compare-result').querySelector('[data-alias-first]').value,$('compare-result').querySelector('[data-alias-second]').value):current.filter((_,i)=>i!==Number(button.dataset.reconcileUnmerge));
+  comparisonAliases.set(key,next);try{localStorage.setItem(key,JSON.stringify(next));}catch{}await renderComparison(data,key);
+ }catch(error){const node=$('compare-result').querySelector('.reconcile-alias-error');if(node)node.textContent=error.message;}
+});
 function aggregateValue(data,row){return data.op==='diff'?row.diff:row.sum;}
 function aggregateText(data,mode='process'){
  const label=BOOK_LABELS[data.book]||data.book,op=data.op==='diff'?'相减':'相加',process=mode==='process';
@@ -658,7 +648,6 @@ $('reload-top').addEventListener('click', load);
 $('d-refresh').addEventListener('click', () => load({forceDetail:true}));
 $('btn-compare').addEventListener('click',openComparison);
 $('compare-refresh').addEventListener('click',()=>refreshComparison());
-$('compare-start').addEventListener('click',()=>{if(window.confirm('以这两个账本的当前数量为起点，重新开始对账？'))refreshComparison(true);});
 $('compare-close').addEventListener('click',()=>{$('compare-panel').hidden=true;});
 for(const id of ['compare-egg','compare-sales'])$(id).addEventListener('change',()=>refreshComparison());
 $('btn-sum').addEventListener('click', () => runAggregate('sum'));

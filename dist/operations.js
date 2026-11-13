@@ -19,10 +19,12 @@ export function newSegment(current,{inherit=[],books=[],now=Date.now()}={}){
   for(const [name,{item,total,parts}] of totals){
    if(!Number.isSafeInteger(total)||total<0||total>C.MAX)throw Error('继承数量超过上限。');
    let target=book.items.find(i=>i.name===name);if(!target){if(key==='egg')C.eggAddItem(book,name,item.ratio||1);else C.addItem(book,name);target=book.items.at(-1);}
+   const before=book.records.length;
    if(key==='egg')C.eggSetCount(book,target.id,total);else{C.setCount(book,target.id,total);if(key==='stock')target.breakdown=parts;}
+   for(const record of book.records.slice(before))record.origin='inherit';
   }
  }
- if(current.reconciliation?.enabled)next.reconciliation=startReconciliation(next.egg,next.sales,now);
+ if(current.reconciliation?.enabled)next.reconciliation={...startReconciliation(next.egg,next.sales,now),...(current.reconciliation.aliases?{aliases:C.clone(current.reconciliation.aliases)}:{})};
  C.validateState(next);C.validateEgg(C.ensureEgg(next));return next;
 }
 export function selectPeriods(periods,start,end){

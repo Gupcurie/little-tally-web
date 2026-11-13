@@ -1,3 +1,4 @@
+import {validAliases} from './reconcile-daily.js';
 const keyFor = name => String(name || '').normalize('NFKC').trim().replace(/\s+/g, ' ').toLowerCase();
 
 function bookBaseline(book, at) {
@@ -50,6 +51,7 @@ function sequence(book, baseline, at) {
 
 export function validReconciliation(baseline) {
   if (baseline?.version !== 1 || baseline.enabled !== true || !Number.isFinite(baseline.at)) return false;
+  if (baseline.aliases!==undefined&&!validAliases(baseline.aliases))return false;
   return ['egg','sales'].every(key => {
     const value=baseline[key];
     return value && (value.lastId===null || typeof value.lastId==='string') &&

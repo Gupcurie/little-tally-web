@@ -225,6 +225,19 @@ def fetch_ledgers(ids):
     return result
 
 
+def comparison_periods(ids):
+    status, rows = supabase('/rest/v1/rpc/tally_admin_comparison_periods', method='POST', body={'p_ids': ids})
+    if status != 200 or not isinstance(rows, list):
+        raise RuntimeError('comparison history unavailable')
+    return rows
+
+
+def comparison_book(book, start, end):
+    book = book if isinstance(book, dict) else {}
+    return {'items': book.get('items') or [], 'records': [r for r in book.get('records') or []
+            if isinstance(r.get('at'), (int, float)) and start <= r['at'] <= end]}
+
+
 def item_totals(book):
     totals = {}
     for rec in (book.get('records') or []):
@@ -753,9 +766,17 @@ class Handler(BaseHTTPRequestHandler):
                 if egg_id not in accounts or sales_id not in accounts:
                     self._json(404, {'error': '账号不存在'})
                     return
-                ledgers = fetch_ledgers(list(dict.fromkeys((egg_id, sales_id))))
+                ids = list(dict.fromkeys((egg_id, sales_id)))
+                ledgers = fetch_ledgers(ids)
                 placed = (ledgers.get(egg_id) or {}).get('payload') or {}
                 sold = (ledgers.get(sales_id) or {}).get('payload') or {}
+                now = int(time.time() * 1000)
+                day_start = int(datetime.fromtimestamp(now / 1000, timezone(timedelta(hours=8))).replace(hour=0, minute=0, second=0, microsecond=0).timestamp() * 1000)
+                periods = comparison_periods(ids)
+                egg_books = [comparison_book(p.get('payload', {}).get('egg'), day_start, now) for p in periods if p.get('source_id') == egg_id]
+                sales_books = [comparison_book(p.get('payload', {}).get('sales'), day_start, now) for p in periods if p.get('source_id') == sales_id]
+                egg_books.append(comparison_book(placed.get('egg'), day_start, now))
+                sales_books.append(comparison_book(sold.get('sales'), day_start, now))
             except Exception:
                 self._json(503, {'error': '账本读取失败，请刷新后重试'})
                 return
@@ -763,10 +784,9 @@ class Handler(BaseHTTPRequestHandler):
                   accounts[egg_id] + ' 放蛋 → ' + accounts[sales_id] + ' 销售',
                   client_ip(self), admin_slot=admin_slot)
             self._json(200, {
-                'egg': placed.get('egg'), 'sales': sold.get('sales'),
+                'egg_books': egg_books, 'sales_books': sales_books,
                 'egg_name': accounts[egg_id], 'sales_name': accounts[sales_id],
-                'periods': [placed.get('periodStartedAt'), sold.get('periodStartedAt')],
-                'generated_at': int(time.time() * 1000),
+                'day_start': day_start, 'generated_at': now,
             })
             return
 

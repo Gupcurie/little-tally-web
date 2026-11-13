@@ -336,3 +336,21 @@ button.egg-reco-main{align-self:stretch;text-align:left;background:transparent;c
  .count-screen main { overflow-y:auto; }
  .count-dashboard { flex:0 0 auto; min-height:360px; }
 }
+
+/* Shared daily reconciliation panel. */
+.reconcile-table th,.reconcile-table td{padding:9px 8px;border-bottom:1px solid #eadce1;text-align:right;white-space:nowrap;font-size:12px}
+.reconcile-table th:first-child{text-align:left;white-space:normal;min-width:90px}
+.reconcile-scroll{overflow-x:auto;max-width:100%}.reconcile-table{width:100%;border-collapse:collapse}
+.reconcile-table .difference{color:#ac3652;font-weight:700}.reconcile-notice{color:#99671b}
+.reconcile-issue{margin:12px 0;border:1px solid #ead5dc;border-radius:12px;background:#fff8f7;padding:12px;overflow-wrap:anywhere}
+.reconcile-issue summary{cursor:pointer;font-size:14px;font-weight:600;line-height:1.7;color:#80364c}
+.reconcile-issue p{font-size:12px;line-height:1.8;margin:8px 0;color:#765a62}
+.reconcile-location{border-top:1px solid #ebdfe3;padding:11px 0 4px}.reconcile-location strong{font-size:13px;color:#492b35}
+.reconcile-alias{margin-top:20px;border-top:1px solid #eadce1;padding-top:12px}.reconcile-alias h3{font-size:15px}
+.reconcile-alias-pickers{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:10px 0}
+.reconcile-alias-pickers select{min-width:0;width:100%;border:1px solid #dfcbd2;border-radius:9px;padding:10px 7px;background:white;font-size:13px;color:#58343f}
+.reconcile-alias-pickers button{grid-column:1/-1;background:#ba3454;color:white;border-radius:9px;padding:11px;font-size:13px;min-height:42px}
+.reconcile-alias-group{display:flex;gap:8px;align-items:center;padding:9px 0;font-size:12px}.reconcile-alias-group span{flex:1;min-width:0;overflow-wrap:anywhere}
+.reconcile-alias-group button{background:#f8e5ea;color:#922e48;border-radius:7px;padding:8px;flex:none;min-height:36px}
+.reconcile-alias-error{color:#ae2848!important;font-size:12px}.reconcile-status.review{background:#fff0dc;color:#855b13;border-color:#eac080}
+@media(max-width:330px){.reconcile-alias-pickers{grid-template-columns:1fr}}

@@ -5,7 +5,8 @@ import {CloudLedger} from './cloud.js';
 import {cloudConfig} from './cloud-config.js';
 import * as Ops from './operations.js';
 import {installItemDrag} from './reorder.js';
-import {startReconciliation,reconcile,reconciliationMarkup} from './reconcile.js';
+import {startReconciliation} from './reconcile.js';
+import {reconcileDaily,dailyMarkup,aliasControls,mergeAliases,validAliases,dayBounds} from './reconcile-daily.js';
 import {ROLES,TUTORIALS,chooseRole,newestProfile,validProfile,beijingDay} from './onboarding.js';
 
 const icons={
@@ -23,7 +24,7 @@ const ledger=localMode?new BrowserLedger():new CloudLedger(cloudConfig);
 let state={page:['count','egg','history','stats','ratio','settings'].includes(location.hash.slice(1))?location.hash.slice(1):'egg',book:'sales',range:0,keyword:'',direction:0,historyLimit:80,selection:new Set(),selecting:false,itemID:null,ratioMode:'parts',ratioSelected:new Set(),ratioValues:Object.create(null),ratioPlan:null,ratioError:null,authMode:'login',baseID:'',selectedHour:null};
 let eggPlanSyncTimer,eggPlanSyncTask=null;
 let itemDrag=null,orderSaving=false,renderedDay=null;
-let reconciliationTimer,comparisonCache=null;
+let reconciliationTimer,comparisonCache=null,reconciliationData=null,reconcileMergeBusy=false;
 let toastTimer,formSubmit=null,restoreExpected=null,backupReady=null;
 let roleAccount=null,roleProfile=null,roleRequired=false,roleBusy=false,roleQueued=false,tutorialRole=null,tutorialStep=0;
 const onboarding=document.createElement('dialog');onboarding.id='onboarding';onboarding.className='onboarding-dialog';onboarding.setAttribute('aria-labelledby','onboarding-title');document.body.append(onboarding);
@@ -613,39 +614,60 @@ async function copyCountReport(){
  catch{showSheet('复制'+label,`<textarea class="field-input count-copy-text" rows="12" readonly aria-label="${label}">${e(text)}</textarea><p class="hint">自动复制未成功，可长按内容全选并复制。</p><button class="primary-button" type="button" data-action="close-sheet">完成</button>`);requestAnimationFrame(()=>{const field=sheetContent.querySelector('.count-copy-text');field?.focus();field?.select();});}
 }
 function installHelp(){const isIOS=/iPad|iPhone|iPod/.test(navigator.userAgent);showSheet('把拆弹专家放进口袋',`<p>添加到主屏幕后，就能像 App 一样从图标打开。</p><ol class="install-steps"><li>${isIOS?'请用 Safari 打开这个网页。':'在手机浏览器中打开这个网页。'}</li><li>${isIOS?'点击浏览器的“分享”按钮。':'打开浏览器菜单，选择“安装应用”或“添加到主屏幕”。'}</li><li>${isIOS?'选择“添加到主屏幕”，如有“作为网页 App 打开”请开启。':'确认名称为“拆弹专家”，完成添加。'}</li></ol><div class="soft-message">建议先添加再正式记数，并固定使用同一个入口。如果已有记录，请先在设置里导出备份，再在主屏幕版导入。</div><button class="primary-button" type="button" data-action="close-sheet">知道了</button>`);}
+function comparisonScope(){return JSON.stringify([localMode?'local':ledger.user?.id,ledger.workspace?.id||'personal',dayBounds().day,ledger.state.periodStartedAt]);}
+function dailyComparisonData(){
+ const scope=comparisonScope();if(reconciliationData?.scope!==scope)reconciliationData={scope,archives:[],loaded:false,loading:false,error:null,version:0};return reconciliationData;
+}
 function reconciliationResult(){
- const baseline=ledger.state.reconciliation;
- if(!baseline?.enabled)return null;
- if(comparisonCache?.snapshot===ledger.state)return comparisonCache.result;
- const result=reconcile(ledger.state.egg,ledger.state.sales,baseline);
- comparisonCache={snapshot:ledger.state,result};
- return result;
+ const data=dailyComparisonData(),day=dayBounds().day;
+ if(comparisonCache?.snapshot===ledger.state&&comparisonCache?.data===data&&comparisonCache?.version===data.version&&comparisonCache?.day===day)return comparisonCache.result;
+ const result=reconcileDaily([...data.archives.map(p=>p.egg),ledger.state.egg],[...data.archives.map(p=>p.sales),ledger.state.sales],{aliases:ledger.state.reconciliation?.aliases||[]});
+ comparisonCache={snapshot:ledger.state,data,version:data.version,day,result};return result;
 }
 function reconciliationStatus(){
  if(!state.books.sales||!state.books.egg)return '';
- const result=reconciliationResult();
- const label=!result?'正在开启对账…':result.status==='error'?'对账异常 '+(result.unmatched+result.overdue):result.waiting?'对账 · 待售 '+result.waiting:'对账一致';
- return `<button type="button" class="reconcile-status ${result?.status||'pending'}" data-action="reconcile-open">${label}</button>`;
+ const data=dailyComparisonData(),result=reconciliationResult();
+ const label=!data.loaded?'正在读取今日对账…':data.error?'对账读取不完整':result.status==='review'?'今日对账待核对 '+(result.waiting+result.unmatched):result.waiting?'对账 · 待对应 '+result.waiting:'今日数量一致';
+ return `<button type="button" class="reconcile-status ${data.error?'error':result.status}" data-action="reconcile-open">${label}</button>`;
 }
-function queueReconciliationStart(){
- clearTimeout(reconciliationTimer);
- if(ledger.readOnly||ledger.loading||ledger.state.reconciliation?.enabled||!state.books.sales||!state.books.egg)return;
- reconciliationTimer=setTimeout(async()=>{
-  if(ledger.saving||eggPlanSyncTask||itemDrag?.active||orderSaving){queueReconciliationStart();return;}
-  try{
-   await ledger.commit(snapshot=>{if(!snapshot.reconciliation?.enabled)snapshot.reconciliation=startReconciliation(snapshot.egg,snapshot.sales);});
-   render();
-  }catch{render();}
- },250);
+async function queueReconciliationStart(force=false){
+ if(ledger.readOnly||ledger.loading||!state.books.sales||!state.books.egg)return;
+ const data=dailyComparisonData();if(data.loading||data.loaded&&!force)return;
+ data.loading=true;data.error=null;
+ try{
+  const bounds=dayBounds(),periods=(await periodList()).filter(p=>p.endedAt>=bounds.start&&p.startedAt<=bounds.end).sort((a,b)=>a.endedAt-b.endedAt),archives=[];
+  for(let i=0;i<periods.length;i+=4){
+   const batch=await Promise.all(periods.slice(i,i+4).map(async p=>localMode?p.payload:await ledger.request('rpc/tally_period_read',{method:'POST',body:{p_id:p.id}})));
+   if(reconciliationData!==data)return;archives.push(...batch);
+  }
+  if(reconciliationData!==data)return;data.archives=archives;data.loaded=true;data.version++;
+ }catch(err){if(reconciliationData===data){data.error=err.message||'今日历史读取失败';data.loaded=true;data.version++;}}
+ finally{data.loading=false;if(reconciliationData===data)render();}
+}
+function comparisonContent(){
+ const data=dailyComparisonData(),aliases=ledger.state.reconciliation?.aliases||[];
+ if(!data.loaded)return '<p>正在读取今天的完整记录（包括已结算分段）…</p>';
+ if(data.error)return `<p class="sheet-error">今日记录未完整读取：${e(data.error)}。请刷新对账后再判断差额。</p>`;
+ const result=reconciliationResult();return dailyMarkup(result)+aliasControls(result,aliases);
 }
 function showReconciliation(){
- const baseline=ledger.state.reconciliation;
- showSheet('销售与放蛋对账',`<p>启用起点：${baseline?e(C.clock(baseline.at,true)):'正在准备'}</p><div class="reconciliation-content">${reconciliationMarkup(reconciliationResult())}</div><button type="button" class="small-button" data-action="reconcile-reset">从现在重新开始</button>`);
+ showSheet('今日销售与放蛋对账',`<button type="button" class="small-button" data-action="reconcile-refresh">刷新今日对账</button><div class="reconciliation-content">${comparisonContent()}</div>`);queueReconciliationStart();
 }
 function refreshReconciliationDetail(){
  const content=sheetContent.querySelector('.reconciliation-content');
- if(sheet.open&&content)content.innerHTML=reconciliationMarkup(reconciliationResult());
+ if(sheet.open&&content){const first=content.querySelector('[data-alias-first]')?.value,second=content.querySelector('[data-alias-second]')?.value,opened=[...content.querySelectorAll('details[open]')].map(n=>n.dataset.issueKey);content.innerHTML=comparisonContent();for(const [selector,value] of [['[data-alias-first]',first],['[data-alias-second]',second]]){const field=content.querySelector(selector);if(field&&value)field.value=value;}content.querySelectorAll('details').forEach(n=>{if(opened.includes(n.dataset.issueKey))n.open=true;});}
 }
+sheetContent.addEventListener('click',async event=>{
+ const button=event.target.closest('[data-reconcile-merge],[data-reconcile-unmerge]');if(!button||reconcileMergeBusy)return;
+ event.preventDefault();const content=button.closest('.reconciliation-content');if(!content)return;const scope=comparisonScope();
+ try{
+  const current=ledger.state.reconciliation?.aliases||[],next=button.hasAttribute('data-reconcile-merge')?mergeAliases(current,content.querySelector('[data-alias-first]').value,content.querySelector('[data-alias-second]').value):current.filter((_,i)=>i!==Number(button.dataset.reconcileUnmerge));
+  reconcileMergeBusy=true;button.disabled=true;
+  await mutateState(snapshot=>{if(scope!==comparisonScope())throw Error('账本已切换，请重新打开对账。');snapshot.reconciliation={...(snapshot.reconciliation||startReconciliation(snapshot.egg,snapshot.sales)),aliases:next};});
+  refreshReconciliationDetail();
+ }catch(err){const error=content.querySelector('.reconcile-alias-error');if(error)error.textContent=err.message;}
+ finally{reconcileMergeBusy=false;if(button.isConnected)button.disabled=false;}
+});
 function workspaceControls(){
  return `<div class="count-scope-actions"><button class="small-button count-scope" data-action="${ledger.workspace?'workspace-details':'workspace-select'}" aria-label="${e(workspaceLabel())}"><span title="${e(workspaceLabel())}">${e(workspaceLabel())}</span></button><button type="button" class="small-button team-entry" data-action="workspace-select">组队/加入组队</button></div>`;
 }
@@ -714,10 +736,7 @@ async function action(a,node){
   if(a==='role-select'||!roleProfile)showRoleChoice(false);else showTutorial(roleProfile.role);return;
  }
  if(a==='reconcile-open'){showReconciliation();return;}
- if(a==='reconcile-reset'){
-  if(!window.confirm('以当前数量为新起点，重新开始销售与放蛋对账？'))return;
-  await mutateState(snapshot=>{snapshot.reconciliation=startReconciliation(snapshot.egg,snapshot.sales);});showReconciliation();return;
- }
+ if(a==='reconcile-refresh'){if(ledger.saving||reconcileMergeBusy)throw Error('请等保存完成后再刷新。');if(!localMode)await ledger.reload();await queueReconciliationStart(true);refreshReconciliationDetail();return;}
  if(a==='workspace-details'){await showTeamDetails();return;}
  if(a==='team-kick'||a==='team-dissolve'){
   if(node.dataset.team!==ledger.workspace?.id)throw Error('当前群已切换，请重新打开成员列表。');
@@ -882,4 +901,4 @@ await ledger.init();render();
 if('serviceWorker'in navigator)navigator.serviceWorker.register('./sw.js').catch(()=>{});
 setInterval(()=>{if(document.visibilityState==='visible'&&!sheet.open&&['count','stats'].includes(state.page)&&renderedDay!==C.day(Date.now()))render();},30000);
 
-setInterval(async()=>{if(!localMode&&ledger.workspace&&ledger.signedIn&&!ledger.saving&&!ledger.loading&&!sheet.open&&!state.bundle&&!itemDrag?.active&&!orderSaving&&document.visibilityState==='visible'){try{await ledger.reload();}catch{}}},5000);
+setInterval(async()=>{if(!localMode&&ledger.workspace&&ledger.signedIn&&!ledger.saving&&!ledger.loading&&(!sheet.open||Boolean(sheetContent.querySelector('.reconciliation-content')))&&!state.bundle&&!itemDrag?.active&&!orderSaving&&document.visibilityState==='visible'){try{await ledger.reload();}catch{}}},5000);

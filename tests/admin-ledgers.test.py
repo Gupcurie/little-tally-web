@@ -258,13 +258,43 @@ class AdminComparisonTest(unittest.TestCase):
         sold['sales']=book('另一个销售物品',[7])
         with patch.object(admin,'fetch_accounts',return_value=[{'id':A,'username':'放蛋人员'},{'id':B,'username':'销售群'}]), \
              patch.object(admin,'fetch_ledgers',return_value={A:{'payload':placed},B:{'payload':sold}}) as fetch, \
+             patch.object(admin,'comparison_periods',return_value=[]), \
              patch.object(admin,'audit') as audit:
             admin.Handler.do_POST(handler)
         self.assertEqual(handler.response[0],200)
-        self.assertEqual(handler.response[1]['egg'],placed['egg'])
-        self.assertEqual(handler.response[1]['sales'],sold['sales'])
+        self.assertEqual(handler.response[1]['egg_books'][-1]['items'],placed['egg']['items'])
+        self.assertEqual(handler.response[1]['sales_books'][-1]['items'],sold['sales']['items'])
+        self.assertEqual(handler.response[1]['egg_books'][-1]['records'],[])
         fetch.assert_called_once_with([A,B])
         self.assertEqual(audit.call_args.kwargs['admin_slot'],'primary')
+
+class DailyComparisonTest(unittest.TestCase):
+    def test_daily_response_includes_closed_segments_and_only_today_records_in_direction(self):
+        stamp=1794628800  # 2026-11-14 12:00 Beijing
+        start=stamp*1000-12*3600000
+        placed=payload();sold=payload()
+        for data in (placed,sold):
+            for key in ('sales','egg'):
+                for i,r in enumerate(data[key]['records']):r['at']=start+i+1
+        placed['egg']['records'].append({'id':'yesterday','itemId':'item','delta':99,'at':start-1})
+        sold['sales']['records'].append({'id':'future','itemId':'item','delta':99,'at':stamp*1000+1})
+        archives=[{'source_id':A,'payload':{'egg':book('已结算放蛋',[1])}},{'source_id':B,'payload':{'sales':book('已结算销售',[1])}}]
+        archives[0]['payload']['egg']['records'][0]['at']=start+1
+        archives[1]['payload']['sales']['records'][0]['at']=start+2
+        handler=Handler();handler.path='/admin/api/compare';handler.body={'egg_id':A,'sales_id':B}
+        with patch.object(admin,'time') as clock, patch.object(admin,'fetch_accounts',return_value=[{'id':A,'username':'投蛋'},{'id':B,'username':'拆弹'}]), patch.object(admin,'fetch_ledgers',return_value={A:{'payload':placed},B:{'payload':sold}}), patch.object(admin,'comparison_periods',return_value=archives), patch.object(admin,'audit'):
+            clock.time.return_value=stamp
+            admin.Handler.do_POST(handler)
+        status,data=handler.response;self.assertEqual(status,200);self.assertEqual(data['day_start'],start)
+        self.assertEqual(len(data['egg_books']),2);self.assertEqual(data['egg_books'][0]['items'][0]['name'],'已结算放蛋')
+        self.assertEqual(len(data['egg_books'][1]['records']),3);self.assertEqual(len(data['sales_books'][1]['records']),2)
+        self.assertNotIn('stock',data)
+
+    def test_unavailable_history_does_not_return_a_false_complete_result(self):
+        handler=Handler();handler.path='/admin/api/compare';handler.body={'egg_id':A,'sales_id':B}
+        with patch.object(admin,'fetch_accounts',return_value=[{'id':A,'username':'A'},{'id':B,'username':'B'}]), patch.object(admin,'fetch_ledgers',return_value={A:{'payload':payload()},B:{'payload':payload()}}), patch.object(admin,'comparison_periods',side_effect=RuntimeError('unavailable')):
+            admin.Handler.do_POST(handler)
+        self.assertEqual(handler.response[0],503)
 
 class AdminProfilesTest(unittest.TestCase):
     def setUp(self):
