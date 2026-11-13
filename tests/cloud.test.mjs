@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {CloudLedger} from '../dist/cloud.js';
 import * as C from '../dist/core.js';
+import {chooseRole} from '../dist/onboarding.js';
 function fixture(){
  const sessions={A:{user:{id:'account-a',email:'a@example.invalid'},access_token:'token-a'},B:{user:{id:'account-b',email:'b@example.invalid'},access_token:'token-b'}};
  let session=sessions.A;const rows=new Map(),requests=[],caches=[];
@@ -18,6 +19,22 @@ function fixture(){
  return {sessions,setSession:s=>{session=s;},rows,requests,caches,auth,createClient,cacheFactory,fetcher,make(extra={}){return new CloudLedger({url:'https://backend.example.invalid',publishableKey:'public-test-key'},{createClient,fetcher,cacheFactory,...extra});}};
 }
 test('cloud acknowledgement persists records across a fresh login',async()=>{const f=fixture(),a=f.make();await a.init();const id=a.state.sales.items[0].id;await a.commit(s=>C.change(s.sales,id,1));const b=f.make();await b.init();assert.equal(C.counts(b.state.sales)[id],1);assert.equal(b.cloudRevision,1);a.channel?.close();b.channel?.close();});
+
+test('account role preferences persist across login without touching personal or group ledger revisions',async()=>{
+ const f=fixture(),a=f.make();await a.init();const original=C.clone(a.state);
+ f.auth.updateUser=async({data})=>{f.sessions.A.user.user_metadata={other:'retained',...data};return {data:{user:f.sessions.A.user},error:null};};
+ const profile=chooseRole('place',true);await a.savePreferences(profile);
+ assert.deepEqual(a.preferences,profile);assert.deepEqual(a.state,original);assert.equal(a.cloudRevision,0);
+ assert.equal(f.requests.some(r=>r.url.endsWith('rpc/tally_save')),false);
+ const b=f.make();await b.init();assert.deepEqual(b.preferences,profile);
+ f.setSession(f.sessions.B);await b.setSession(f.sessions.B);assert.equal(b.preferences,null);
+ a.channel?.close();b.channel?.close();
+});
+test('a rejected role preference update preserves the previous confirmed preferences',async()=>{
+ const f=fixture(),a=f.make();await a.init();f.auth.updateUser=async()=>({error:{message:'offline'},data:{user:null}});
+ await assert.rejects(a.savePreferences(chooseRole('place',true)),/没有保存成功/);assert.equal(a.preferences,null);assert.equal(a.readOnly,false);
+ a.channel?.close();
+});
 test('saved egg recommendation shares the exact sequence through cloud reload and advances atomically with a placement',async()=>{
  const f=fixture(),a=f.make();await a.init();
  await a.commit(s=>{const egg=C.ensureEgg(s);[['甲',8],['乙',6],['丙',1],['丁',1]].forEach(([name,ratio])=>C.eggAddItem(egg,name,ratio));egg.recommendation=C.eggCreatePlan(egg);});

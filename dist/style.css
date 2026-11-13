@@ -286,6 +286,52 @@ button.egg-reco-main{align-self:stretch;text-align:left;background:transparent;c
 .team-member>span { min-width:0; overflow-wrap:anywhere; }
 .team-member button { flex:none; }
 .team-members { margin-bottom:18px; }
+.onboarding-dialog { width:min(520px,calc(100% - 24px)); max-width:calc(100% - 24px); max-height:90dvh; bottom:auto; top:50%; margin:0 auto; transform:translateY(-50%); border-radius:24px; padding:24px; background:#fffaf8; }
+.onboarding-dialog::backdrop { background:#35222b8a; backdrop-filter:blur(3px); }
+.onboarding-brand { display:flex; align-items:center; gap:9px; margin-bottom:18px; font-size:12px; color:#916570; }
+.onboarding-brand img { width:35px; height:35px; object-fit:cover; border-radius:11px; }
+.onboarding-dialog h2 { font-size:24px; line-height:1.35; color:#49232e; margin-bottom:10px; }
+.onboarding-dialog .onboarding-intro { font-size:14px; margin-bottom:18px; }
+.role-options { display:grid; grid-template-columns:1fr 1fr; gap:10px; }
+.role-option { display:flex; align-items:center; gap:10px; padding:17px 13px; border:1px solid #e9bac5; border-radius:16px; background:#ffedf0; color:#9c2846; min-width:0; text-align:left; }
+.role-option>span { flex:1; min-width:0; }
+.role-option strong,.role-option small { display:block; overflow-wrap:anywhere; }
+.role-option strong { font-size:15px; line-height:1.5; }
+.role-option small { font-size:12px; line-height:1.6; margin-top:5px; font-weight:400; color:#875f69; }
+.role-option>.icon { flex:none; width:19px; }
+.role-option.experienced { background:#fff; border-color:#e8dadd; }
+.role-option:focus-visible { outline:3px solid #a1cbb4; outline-offset:2px; }
+.role-option:disabled { opacity:.55; }
+.onboarding-dialog .role-note { margin:16px 0 0; font-size:12px; color:#876b73; }
+.onboarding-cancel { width:100%; margin-top:14px; }
+.tutorial-heading { display:flex; justify-content:space-between; align-items:center; gap:12px; }
+.tutorial-progress { display:flex; gap:5px; margin:18px 0 16px; }
+.tutorial-progress span { height:4px; flex:1; border-radius:5px; background:#efdee3; }
+.tutorial-progress .done { background:#bd3e60; }
+.onboarding-dialog .tutorial-step { color:#a14a63; font-size:12px; font-variant-numeric:tabular-nums; letter-spacing:2px; margin-bottom:8px; }
+.tutorial-copy { margin:16px 0 20px; }
+.onboarding-dialog .tutorial-copy p,.tutorial-copy li { font-size:14px; line-height:1.85; color:#73565e; }
+.tutorial-copy p+p { margin-top:12px; }
+.tutorial-copy strong { color:#49232e; font-weight:650; }
+.tutorial-copy ul { padding-left:20px; margin:10px 0; }
+.tutorial-buttons { display:grid; grid-template-columns:1fr 1.7fr; gap:10px; }
+.tutorial-buttons button { min-height:46px; min-width:0; }
+.tutorial-buttons button:disabled { opacity:.4; }
+.tutorial-green { color:#24784f; background:#e0f2e5; padding:2px 5px; border-radius:5px; }
+.tutorial-red { color:#b73350; background:#ffe7ed; padding:2px 5px; border-radius:5px; }
+.onboarding-error { color:#b02746!important; font-size:13px!important; margin-top:12px!important; }
+.onboarding-error:empty { display:none; }
+.tutorial-highlight { outline:3px solid #eb9bac!important; outline-offset:3px; }
+@media(max-width:440px) {
+ .onboarding-dialog { padding:20px; border-radius:20px; }
+ .role-options { grid-template-columns:1fr; gap:8px; }
+ .role-option { padding:12px; }
+ .role-option strong { font-size:14px; }
+ .role-option small { margin-top:2px; }
+}
+@media(max-height:500px) {
+ .onboarding-dialog { max-height:94dvh; padding:16px; }
+}
 @media(max-height:420px) {
  .count-screen main { overflow-y:auto; }
  .count-dashboard { flex:0 0 auto; min-height:360px; }

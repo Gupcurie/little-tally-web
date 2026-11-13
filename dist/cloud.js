@@ -2,11 +2,12 @@ import {canonicalUsername,checkPassword,accountAddress} from './account.js';
 import {initialState,validateState,clone,uid} from './core.js';
 import {BrowserLedger} from './storage.js';
 import {newSegment} from './operations.js';
+import {validProfile} from './onboarding.js';
 
 export class CloudLedger {
  constructor(config,{createClient,fetcher=globalThis.fetch.bind(globalThis),cacheFactory=scope=>new BrowserLedger({scope})}={}){
   this.config=config;this.createClient=createClient;this.fetcher=fetcher;this.cacheFactory=cacheFactory;
-  this.workspace=null;this.teams=[];this.state=initialState();this.user=null;this.signedIn=false;this.requiresAuth=true;this.configured=Boolean(config.authEnabled!==false&&config.url&&config.publishableKey);
+  this.workspace=null;this.teams=[];this.state=initialState();this.user=null;this.preferences=null;this.signedIn=false;this.requiresAuth=true;this.configured=Boolean(config.authEnabled!==false&&config.url&&config.publishableKey);
   this.readOnly=true;this.error=null;this.loading=false;this.saving=false;this.savedAt=null;this.cloudRevision=null;this.cache=null;this.cacheWarning=null;this.epoch=0;this.recoverable=null;this.protection=false;this.onchange=()=>{};this.channel=null;this._accountTask=Promise.resolve();
  }
  get db(){return this.signedIn&&this.client;}
@@ -28,13 +29,13 @@ export class CloudLedger {
  async setSession(session){
   const epoch=++this.epoch,oldCache=this.cache;
   // Clear the rendered account before any asynchronous validation or fetch.
-  this.workspace=null;this.teams=[];this.state=initialState();this.user=null;this.signedIn=false;this.readOnly=true;this.cloudRevision=null;this.savedAt=null;this.cache=null;this.error=null;this.loading=Boolean(session);this.onchange();
+  this.workspace=null;this.teams=[];this.state=initialState();this.user=null;this.preferences=null;this.signedIn=false;this.readOnly=true;this.cloudRevision=null;this.savedAt=null;this.cache=null;this.error=null;this.loading=Boolean(session);this.onchange();
   if(oldCache){try{await oldCache.clear();}catch{this.cacheWarning='上一账户的本机缓存未能完全清除；云端账户隔离仍有效。';}}
   if(!session){this.loading=false;this.onchange();return;}
   try{
    const {data,error}=await this.client.auth.getUser();if(error||!data.user||data.user.id!==session.user.id)throw new Error('登录已失效，请重新登录。');
    if(epoch!==this.epoch)return;
-   this.user={id:data.user.id,username:data.user.app_metadata?.tally_username||'',email:data.user.email};this.signedIn=true;
+   this.user={id:data.user.id,username:data.user.app_metadata?.tally_username||'',email:data.user.email};this.preferences=validProfile(data.user.user_metadata?.tally_onboarding);this.signedIn=true;
    this.cache=this.cacheFactory('account-'+data.user.id);await this.cache.init();
    if(epoch!==this.epoch)return;
    this.teams=await this.listTeams();
@@ -154,6 +155,15 @@ export class CloudLedger {
   }finally{clearTimeout(timer);}
  }
  async logout(){if(this.saving)throw new Error('请等当前这笔保存完成后再退出。');const {error}=await this.client.auth.signOut({scope:'local'});if(error)throw new Error('退出未完成，请检查网络后重试。');await this.setSession(null);}
+ async savePreferences(value){
+  const profile=validProfile(value);if(!profile)throw new Error('岗位设置格式不正确。');
+  const who=await this.token();
+  const {data,error}=await this.client.auth.updateUser({data:{tally_onboarding:profile}});
+  if(who.user!==this.user?.id||!this.signedIn)throw new Error('账户已经切换，请在当前账户重新选择岗位。');
+  if(error||data?.user?.id!==who.user)throw new Error('岗位设置没有保存成功，请检查网络后重试。');
+  this.preferences=validProfile(data.user.user_metadata?.tally_onboarding)||profile;
+  return clone(this.preferences);
+ }
  async changePassword(oldPassword,newPassword){
   if(!this.client)throw new Error('账户服务尚未开通。');
   if(!this.signedIn||!this.user?.email)throw new Error('请先登录。');

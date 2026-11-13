@@ -6,6 +6,7 @@ import {cloudConfig} from './cloud-config.js';
 import * as Ops from './operations.js';
 import {installItemDrag} from './reorder.js';
 import {startReconciliation,reconcile,reconciliationMarkup} from './reconcile.js';
+import {ROLES,TUTORIALS,chooseRole,newestProfile,validProfile,beijingDay} from './onboarding.js';
 
 const icons={
  count:'<rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/>',
@@ -24,6 +25,8 @@ let eggPlanSyncTimer,eggPlanSyncTask=null;
 let itemDrag=null,orderSaving=false,renderedDay=null;
 let reconciliationTimer,comparisonCache=null;
 let toastTimer,formSubmit=null,restoreExpected=null,backupReady=null;
+let roleAccount=null,roleProfile=null,roleRequired=false,roleBusy=false,roleQueued=false,tutorialRole=null,tutorialStep=0;
+const onboarding=document.createElement('dialog');onboarding.id='onboarding';onboarding.className='onboarding-dialog';onboarding.setAttribute('aria-labelledby','onboarding-title');document.body.append(onboarding);
 icons.egg='<path d="M12 3c3.6 0 6.5 4.4 6.5 9.2 0 4.4-2.9 8.3-6.5 8.3S5.5 16.6 5.5 12.2C5.5 7.4 8.4 3 12 3z"/><path d="M9.5 9.5c.6-1.2 1.5-2 2.5-2"/>';
 const TAB_LABELS={count:'记数',egg:'放蛋',history:'历史',stats:'统计',ratio:'比例',settings:'设置'};
 const DEFAULT_TABS=['count','egg','history','stats','ratio','settings'];
@@ -32,7 +35,11 @@ const saveTabs=tabs=>{try{localStorage.setItem('little-tally-tabs',JSON.stringif
 const loadEggMode=()=>{try{const raw=localStorage.getItem('little-tally-egg-mode');return raw===null?true:raw==='1';}catch{return true;}};
 const saveEggMode=value=>{try{localStorage.setItem('little-tally-egg-mode',value?'1':'0');}catch{}};
 const loadBooks=()=>{try{const raw=JSON.parse(localStorage.getItem('little-tally-books')||'null');if(raw&&typeof raw==='object')return {sales:raw.sales!==false,stock:raw.stock!==false,egg:raw.egg!==false};}catch{}return {sales:true,stock:true,egg:true};};
-const saveBooks=books=>{try{localStorage.setItem('little-tally-books',JSON.stringify(books));}catch{}};
+const saveBooks=async books=>{
+ if(localMode){try{localStorage.setItem('little-tally-books',JSON.stringify(books));}catch{}return;}
+ if(roleBusy)throw Error('请等岗位设置保存后再调整功能。');
+ if(roleProfile){roleBusy=true;try{await saveRoleProfile({...roleProfile,books,updatedAt:Date.now()});}finally{roleBusy=false;}}
+};
 Object.assign(state,{eggPick:null,eggPlan:null,eggMotionKey:null,eggStatsLimit:80,eggOnlyLeft:false,eggItemID:null,eggSelecting:false,eggSelection:new Set(),eggDraft:null,eggCols:2,tabDrag:null,books:loadBooks(),statsGran:'hour',statsItem:null});
 const enabledBooks=()=>['sales','stock','egg'].filter(k=>state.books[k]);
 const eggMode=()=>enabledBooks().length===1&&state.books.egg;
@@ -53,6 +60,9 @@ function render(){
  document.body.classList.toggle('egg-screen',(localMode||ledger.signedIn)&&!ledger.loading&&!ledger.readOnly&&state.page==='egg'&&!state.eggItemID);
  document.querySelector('[data-icon="install"]').innerHTML=icon('install');
  if(!localMode&&(!ledger.signedIn||ledger.loading)){nav.hidden=true;main.innerHTML=loginView();return;}
+ syncRoleAccount();
+ if(!state.books.egg&&state.page==='egg')state.page='count';
+ if(!state.books.sales&&!state.books.stock&&state.page==='count')state.page='egg';
  nav.hidden=false;
  nav.innerHTML=TABS.filter(p=>{if(p==='egg')return state.books.egg;if(p==='count')return state.books.sales||state.books.stock;return true;}).map(p=>`<button data-action="page" data-page="${p}" class="${state.page===p?'active':''}" ${state.page===p?'aria-current="page"':''}>${icon(p)}<span>${TAB_LABELS[p]}</span></button>`).join('');
  if(ledger.readOnly&&state.page!=='settings'){main.innerHTML=`<div class="empty">${icon('shield')}<strong>先保护好你的记录</strong><p>${e(ledger.error)}</p>${!localMode?'<button class="primary-button" data-action="sync-cloud">重新同步云端记录</button>':''}<button class="secondary-button" style="margin-top:12px" data-action="page" data-page="settings">查看恢复与备份</button></div>`;return;}
@@ -62,7 +72,7 @@ function render(){
   try{main.innerHTML=({count:countView,egg:eggView,history:historyView,stats:statsViewNew,ratio:ratioView,settings:settingsView}[state.page]||countView)();}
   catch(err){state.eggItemID=null;state.page='count';main.innerHTML=countView();toast('这个页面刚刚没打开，已回到记数页。');}
  }
- if((localMode||ledger.signedIn)&&!ledger.loading){const scope=document.createElement('div');scope.className='workspace-bar';scope.innerHTML=workspaceBar();if(state.page==='settings')main.insertAdjacentHTML('afterbegin',daySettingsView());if(!main.firstElementChild?.classList.contains('count-dashboard'))main.prepend(scope);}
+ if((localMode||ledger.signedIn)&&!ledger.loading){const scope=document.createElement('div');scope.className='workspace-bar';scope.innerHTML=workspaceBar();if(state.page==='settings')main.insertAdjacentHTML('afterbegin',roleSettingsView()+daySettingsView());if(!main.firstElementChild?.classList.contains('count-dashboard'))main.prepend(scope);}
  layoutVars();fitItemGrid();
  const currentDashboard=main.querySelector('.count-dashboard');
  if(previousScroll&&currentDashboard?.dataset.scope===previousScope){const grid=currentDashboard.querySelector('.item-grid');if(grid)grid.scrollTop=previousScroll;}
@@ -74,8 +84,79 @@ function render(){
    if(peak)chart.scrollLeft=peak.offsetLeft+(peak.offsetWidth-chart.clientWidth)/2;
   }
  }
- fitEggGrid();animateEggRecommendation();refreshEggPlan();queueEggPlanSync();queueReconciliationStart();refreshReconciliationDetail();
+ fitEggGrid();animateEggRecommendation();refreshEggPlan();if(!roleRequired){queueEggPlanSync();queueReconciliationStart();}refreshReconciliationDetail();queueOnboarding();
 }
+function isTutorialTestAccount(){return !localMode&&ledger.user?.username==='123';}
+function roleStorageKey(){return 'little-tally-onboarding:'+(localMode?'local':ledger.user?.id);}
+function syncRoleAccount(){
+ const account=localMode?'local':ledger.user?.id;if(!account||roleAccount===account)return;
+ roleAccount=account;let cached;try{cached=JSON.parse(localStorage.getItem(roleStorageKey())||'null');}catch{}
+ roleProfile=newestProfile(ledger.preferences,cached);
+ state.books=roleProfile?{...roleProfile.books}:localMode?loadBooks():{sales:true,stock:true,egg:true};
+ roleRequired=!localMode&&(isTutorialTestAccount()||roleProfile?.day!==beijingDay());
+ tutorialRole=null;
+ if(roleProfile)state.book=ROLES[roleProfile.role].book;
+}
+async function saveRoleProfile(next){
+ const account=roleAccount,valid=validProfile(next);if(!valid)throw Error('岗位设置格式不正确。');
+ const saved=localMode?valid:await ledger.savePreferences(valid);
+ if(account!==roleAccount)throw Error('账户已切换，请重新选择岗位。');
+ roleProfile=saved;try{localStorage.setItem(roleStorageKey(),JSON.stringify(saved));}catch{}
+ return saved;
+}
+function queueOnboarding(){
+ if(localMode||roleQueued||onboarding.open||sheet.open||ledger.loading||!ledger.signedIn||ledger.readOnly)return;
+ if(!roleRequired&&!roleProfile?.tutorialPending)return;
+ roleQueued=true;setTimeout(()=>{roleQueued=false;if(!ledger.signedIn||ledger.loading||ledger.readOnly||onboarding.open||sheet.open)return;if(roleRequired)showRoleChoice(true);else if(roleProfile?.tutorialPending)showTutorial(roleProfile.role);},0);
+}
+function clearTutorialHighlight(){main.querySelectorAll('.tutorial-highlight').forEach(n=>n.classList.remove('tutorial-highlight'));}
+function closeOnboarding(){clearTutorialHighlight();tutorialRole=null;if(onboarding.open)onboarding.close();}
+function showRoleChoice(required=false){
+ if(state.bundle){toast('请先确认或取消这组多蛋购买。');return;}
+ if(ledger.saving||orderSaving||roleBusy){toast('请等当前保存完成后再切换岗位。');return;}
+ clearTutorialHighlight();tutorialRole=null;if(sheet.open)closeSheet();
+ onboarding.dataset.mode='role';onboarding.dataset.required=required?'1':'0';
+ const test=isTutorialTestAccount();
+ onboarding.innerHTML=`<div class="onboarding-brand"><img src="./icon-192.png" alt=""><span>拆弹专家 · ${test?'教程测试':'岗位选择'}</span></div><h2 id="onboarding-title">今天负责什么？</h2><p class="onboarding-intro">${test?'账号 123 每次打开都会重新展示教程。':'选好岗位，再开始记数。'}</p><div class="role-options">${['dismantle','place'].map(role=>`<button type="button" class="role-option" data-role-choice="${role}" data-newbie="1">${icon(role==='place'?'egg':'count')}<span><strong>${test?'今天':'第一次用，今天'}${ROLES[role].name}</strong><small>${role==='place'?'放蛋 · 查看详细教程':'销售和库存 · 查看详细教程'}</small></span>${icon('arrow')}</button>`).join('')}${test?'':['dismantle','place'].map(role=>`<button type="button" class="role-option experienced" data-role-choice="${role}" data-newbie="0"><span><strong>经常${ROLES[role].name}，不需要教程</strong><small>${role==='place'?'直接进入放蛋':'直接进入销售，可切换库存'}</small></span>${icon('arrow')}</button>`).join('')}</div><p class="role-note">拆弹默认开销售、库存；投蛋默认只开放蛋。其他功能可到设置打开，已有数据保留。</p><p class="onboarding-error" role="alert"></p>${required?'':'<button type="button" class="small-button onboarding-cancel" data-onboard="cancel">暂不切换</button>'}`;
+ if(!onboarding.open)onboarding.showModal();onboarding.scrollTop=0;
+}
+function showTutorial(role,step=0){
+ if(!ROLES[role])return;tutorialRole=role;tutorialStep=Math.max(0,Math.min(TUTORIALS[role].length-1,step));
+ const entry=TUTORIALS[role][tutorialStep],total=TUTORIALS[role].length;
+ clearTutorialHighlight();if(sheet.open)closeSheet();state.page=entry.page;state.book=ROLES[role].book;state.itemID=null;state.eggItemID=null;history.replaceState(null,'','#'+state.page);render();
+ onboarding.dataset.mode='tutorial';onboarding.dataset.required='0';
+ onboarding.innerHTML=`<div class="tutorial-heading"><span class="badge">${ROLES[role].name}教程</span><button type="button" class="small-button" data-onboard="finish">暂时跳过</button></div><div class="tutorial-progress" aria-label="第 ${tutorialStep+1} 步，共 ${total} 步">${Array.from({length:total},(_,i)=>`<span class="${i<=tutorialStep?'done':''}"></span>`).join('')}</div><p class="tutorial-step">${String(tutorialStep+1).padStart(2,'0')} / ${String(total).padStart(2,'0')}</p><h2 id="onboarding-title">${entry.title}</h2><div class="tutorial-copy">${entry.body}</div><p class="onboarding-error" role="alert"></p><div class="tutorial-buttons"><button type="button" class="secondary-button" data-onboard="back" ${tutorialStep?'':'disabled'}>上一步</button><button type="button" class="primary-button" data-onboard="${tutorialStep===total-1?'finish':'next'}">${tutorialStep===total-1?'开始'+ROLES[role].name+'记数':'下一步'}</button></div>`;
+ if(!onboarding.open)onboarding.showModal();onboarding.scrollTop=0;
+ main.querySelector(entry.target)?.classList.add('tutorial-highlight');
+}
+function roleSettingsView(){return `<section class="panel role-settings"><h2>岗位与新手教程</h2><p class="hint">${roleProfile?'当前岗位：'+ROLES[roleProfile.role].name+'。':'选择岗位后，会设置对应的默认功能。'}切换岗位不修改账本数量。</p><button type="button" class="list-button" data-action="role-select">${icon('count')}<span>切换岗位</span>${icon('arrow')}</button><button type="button" class="list-button" data-action="tutorial-open">${icon('file')}<span>查看新手教程</span>${icon('arrow')}</button></section>`;}
+onboarding.addEventListener('cancel',event=>{event.preventDefault();if(roleBusy)return;if(onboarding.dataset.mode==='tutorial')finishTutorial().catch(showOnboardingError);else if(onboarding.dataset.required!=='1')closeOnboarding();});
+function showOnboardingError(err){const node=onboarding.querySelector('.onboarding-error');if(node)node.textContent=err.message||'没有保存成功，请重试。';}
+async function finishTutorial(){
+ if(roleBusy)return;roleBusy=true;onboarding.querySelectorAll('button').forEach(n=>n.disabled=true);
+ const role=tutorialRole;
+ try{if(roleProfile?.tutorialPending)await saveRoleProfile({...roleProfile,tutorialPending:false,updatedAt:Date.now()});closeOnboarding();if(role){state.page=ROLES[role].page;state.book=ROLES[role].book;history.replaceState(null,'','#'+state.page);}render();}
+ catch(err){showOnboardingError(err);onboarding.querySelectorAll('button').forEach(n=>n.disabled=false);}
+ finally{roleBusy=false;}
+}
+onboarding.addEventListener('click',async event=>{
+ const button=event.target.closest('button');if(!button||roleBusy)return;
+ if(button.dataset.roleChoice){
+  const role=button.dataset.roleChoice,newbie=button.dataset.newbie==='1';roleBusy=true;
+  onboarding.querySelectorAll('button').forEach(n=>n.disabled=true);
+  try{
+   clearTimeout(eggPlanSyncTimer);clearTimeout(reconciliationTimer);if(eggPlanSyncTask)await eggPlanSyncTask.catch(()=>{});
+   await saveRoleProfile(chooseRole(role,newbie));roleRequired=false;state.books={...roleProfile.books};state.book=ROLES[role].book;resetWorkspaceUI();state.page=ROLES[role].page;history.replaceState(null,'','#'+state.page);
+   if(newbie)showTutorial(role);else{closeOnboarding();render();}
+  }catch(err){showOnboardingError(err);onboarding.querySelectorAll('button').forEach(n=>n.disabled=false);}
+  finally{roleBusy=false;}return;
+ }
+ const a=button.dataset.onboard;
+ if(a==='next')showTutorial(tutorialRole,tutorialStep+1);
+ if(a==='back')showTutorial(tutorialRole,tutorialStep-1);
+ if(a==='finish')await finishTutorial();
+ if(a==='cancel')closeOnboarding();
+});
 function animateEggRecommendation(){
  const box=main.querySelector('.egg-reco');
  if(!box){state.eggMotionKey=null;return;}
@@ -628,6 +709,10 @@ async function featureAction(a,node){
  return false;
 }
 async function action(a,node){
+ if(a==='role-select'||a==='tutorial-open'){
+  if(state.bundle){toast('请先确认或取消这组多蛋购买。');return;}
+  if(a==='role-select'||!roleProfile)showRoleChoice(false);else showTutorial(roleProfile.role);return;
+ }
  if(a==='reconcile-open'){showReconciliation();return;}
  if(a==='reconcile-reset'){
   if(!window.confirm('以当前数量为新起点，重新开始销售与放蛋对账？'))return;
@@ -673,7 +758,7 @@ async function action(a,node){
  if(a==='stats-hour'){state.selectedHour=Number(node.dataset.hour);state.statsGran='minute';render();return;}
  if(a==='egg-mode'){state.books={sales:state.books.sales,stock:state.books.stock,egg:!state.books.egg};saveBooks(state.books);render();return;}
  if(a==='sales-stock-toggle'){node.disabled=true;try{await mutateState(s=>C.setSalesStockEnabled(s,!C.salesStockEnabled(s)));}finally{if(node.isConnected)node.disabled=false;}return;}
- if(a==='book-toggle'){const k=node.dataset.book,next={...state.books,[k]:!state.books[k]};if(!next.sales&&!next.stock&&!next.egg){toast('至少要留一个功能。');return;}state.books=next;saveBooks(next);if(!enabledBooks().includes(state.book))state.book=enabledBooks()[0];if(!next.egg&&state.page==='egg'){state.page='count';state.eggItemID=null;history.replaceState(null,'','#count');}if(!next.sales&&!next.stock&&state.page==='count'){state.page='egg';history.replaceState(null,'','#egg');}render();return;}
+ if(a==='book-toggle'){const k=node.dataset.book,next={...state.books,[k]:!state.books[k]};if(!next.sales&&!next.stock&&!next.egg){toast('至少要留一个功能。');return;}node.disabled=true;try{await saveBooks(next);state.books=next;}finally{if(node.isConnected)node.disabled=false;}if(!enabledBooks().includes(state.book))state.book=enabledBooks()[0];if(!next.egg&&state.page==='egg'){state.page='count';state.eggItemID=null;history.replaceState(null,'','#count');}if(!next.sales&&!next.stock&&state.page==='count'){state.page='egg';history.replaceState(null,'','#egg');}render();return;}
  if(a==='tab-up'||a==='tab-down'){const p=node.dataset.page,i=TABS.indexOf(p),j=a==='tab-up'?i-1:i+1;if(i<0||j<0||j>=TABS.length){return;}[TABS[i],TABS[j]]=[TABS[j],TABS[i]];saveTabs(TABS);render();return;}
  if(a==='egg-plan'){showEggPlan();return;}
  if(a==='egg-plan-refresh'){regenerateEggPlan(eggBook());render();showEggPlan();return;}
@@ -792,7 +877,7 @@ window.addEventListener('hashchange',()=>{const p=location.hash.slice(1);if(['co
 window.addEventListener('pageshow',()=>{if(ledger.db&&!ledger.saving)ledger.reload().then(render).catch(()=>{});});
 document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible'&&ledger.db&&!ledger.saving)ledger.reload().then(render).catch(()=>{});});
 if(localMode&&ledger.channel)ledger.channel.onmessage=()=>{if(!ledger.saving)ledger.reload().then(()=>{render();toast('已同步本机另一页面的最新记录。');}).catch(()=>{});};
-ledger.onchange=()=>{if(ledger.workspaceNotice){toast(ledger.workspaceNotice);ledger.workspaceNotice=null;resetWorkspaceUI();if(sheet.open)closeSheet();}if(!localMode&&!ledger.signedIn){state.bundle=null;clearTimeout(eggPlanSyncTimer);state.eggPick=null;state.eggPlan=null;if(sheet.open)closeSheet();state.itemID=null;state.selection.clear();state.ratioValues=Object.create(null);state.ratioSelected.clear();state.ratioPlan=null;}render();};
+ledger.onchange=()=>{if(ledger.workspaceNotice){toast(ledger.workspaceNotice);ledger.workspaceNotice=null;resetWorkspaceUI();if(sheet.open)closeSheet();}if(!localMode&&!ledger.signedIn){roleAccount=null;roleProfile=null;roleRequired=false;closeOnboarding();state.bundle=null;clearTimeout(eggPlanSyncTimer);state.eggPick=null;state.eggPlan=null;if(sheet.open)closeSheet();state.itemID=null;state.selection.clear();state.ratioValues=Object.create(null);state.ratioSelected.clear();state.ratioPlan=null;}render();};
 await ledger.init();render();
 if('serviceWorker'in navigator)navigator.serviceWorker.register('./sw.js').catch(()=>{});
 setInterval(()=>{if(document.visibilityState==='visible'&&!sheet.open&&['count','stats'].includes(state.page)&&renderedDay!==C.day(Date.now()))render();},30000);
