@@ -445,7 +445,7 @@ def fetch_accounts():
         })
     for team in fetch_teams():
         stats = ledger_stats(team.get('payload'))
-        accounts.append({'id': team['id'], 'username': '群 · ' + team['name'], 'entity_type': 'team', 'members': team.get('members', 0), 'created_at': team.get('created_at'), 'last_sign_in_at': None, 'banned_until': None, 'confirmed': True, 'revision': team.get('revision'), 'ledger_updated_at': team.get('updated_at'), 'books': stats, 'items': sum(v['items'] for v in stats.values()), 'records': sum(v['records'] for v in stats.values()), **account_activity(team.get('payload'))})
+        accounts.append({'id': team['id'], 'username': '群 · ' + team['name'], 'entity_type': 'team', 'daily_kind': team.get('daily_kind'), 'day': team.get('day'), 'can_reset_angel': team.get('daily_kind') == 'angel' and team.get('day') == datetime.now(timezone(timedelta(hours=8))).date().isoformat(), 'members': team.get('members', 0), 'created_at': team.get('created_at'), 'last_sign_in_at': None, 'banned_until': None, 'confirmed': True, 'revision': team.get('revision'), 'ledger_updated_at': team.get('updated_at'), 'books': stats, 'items': sum(v['items'] for v in stats.values()), 'records': sum(v['records'] for v in stats.values()), **account_activity(team.get('payload'))})
     accounts.sort(key=lambda a: (-account_modified_time(a), a['username'] or '~', a['id']))
     return accounts
 
@@ -752,6 +752,37 @@ class Handler(BaseHTTPRequestHandler):
                 self._json(200, {'ok': True, 'message': '已提交，安全服务将在几秒内应用'})
             except (ValueError, TypeError) as exc:
                 self._json(400, {'error': str(exc)})
+            return
+
+        if path == '/api/teams/reset-angel':
+            body = self._body() or {}
+            if not isinstance(body, dict):
+                self._json(400, {'error': '请求格式无效'})
+                return
+            team_id, mutation = body.get('team_id'), body.get('mutation')
+            revision = body.get('expected_revision')
+            if (not isinstance(team_id, str) or not ACCOUNT_ID.fullmatch(team_id)
+                    or not isinstance(mutation, str) or not ACCOUNT_ID.fullmatch(mutation)
+                    or type(revision) is not int or revision < 0 or body.get('confirm') != '清零天使大群'):
+                self._json(400, {'error': '请核对群和修订号，并输入“清零天使大群”确认'})
+                return
+            try:
+                status, result = supabase('/rest/v1/rpc/tally_admin_reset_angel', method='POST', body={
+                    'p_team_id': team_id, 'p_expected_revision': revision, 'p_mutation': mutation, 'p_admin_slot': admin_slot})
+            except Exception:
+                self._json(503, {'error': '清零结果尚未确认，请先刷新群数据核对，不要连续重复清零'})
+                return
+            if status >= 500 or status == 200 and not isinstance(result, dict):
+                self._json(503, {'error': '清零结果尚未确认，请先刷新群数据核对，不要连续重复清零'})
+                return
+            if status != 200:
+                message = str((result or {}).get('message', '')) if isinstance(result, dict) else ''
+                conflict = 'TALLY_CONFLICT' in message
+                audit('reset_angel', team_id, '', client_ip(self), 'failed', note=message[:120], admin_slot=admin_slot)
+                self._json(409 if conflict else 400, {'error': '群数据刚刚更新，请刷新核对后再确认清零' if conflict else '只能清零今天的天使大群，本次没有执行清零'})
+                return
+            audit('reset_angel', team_id, '今日天使大群', client_ip(self), note='已保存清零前备份；销售/库存/放蛋/投蛋清点归零' + ('；重复请求未再次清零' if result.get('replayed') else ''), admin_slot=admin_slot)
+            self._json(200, {'ok': True, 'revision': result.get('revision'), 'replayed': result.get('replayed', False)})
             return
 
         if path == '/api/compare':

@@ -323,6 +323,7 @@ function openDetail(account) {
   actions.appendChild(exp);
   actions.appendChild(expJson);
   actions.appendChild(cp);
+  if(account.can_reset_angel){const reset=el('button','ghost small','清零天使大群');reset.type='button';reset.addEventListener('click',()=>resetAngelTeam(account,reset));actions.appendChild(reset);}
 
   const body = $('d-body');
   body.textContent = '';
@@ -383,6 +384,16 @@ function openDetail(account) {
   }
   $('detail').hidden = false;
   if (hadPlan && ACTIVE_EGG_VIEW) loadAccountEggPlan(account, ACTIVE_EGG_VIEW.target, ACTIVE_EGG_VIEW.button);
+}
+
+async function resetAngelTeam(account,button){
+ if(!account.can_reset_angel)return;
+ const text=window.prompt('将「'+account.username+'」的销售、库存、放蛋和投蛋库存清点全部清零，放蛋回到第1轮。物品、比例、成员保留，清零前会保存备份。请输入“清零天使大群”确认：');
+ if(text===null)return;if(text!=='清零天使大群'){flash('确认文字不一致，未执行清零。');return;}
+ button.disabled=true;button.textContent='正在清零…';
+ try{await api('/api/teams/reset-angel',{method:'POST',body:JSON.stringify({team_id:account.id,expected_revision:account.revision,mutation:crypto.randomUUID(),confirm:text})});await load();flash('天使大群已清零，清零前数据已备份。');}
+ catch(error){flash('清零未完成：'+error.message);}
+ finally{button.disabled=false;button.textContent='清零天使大群';}
 }
 
 function loadRecommendationCore() { return import('/core.js'); }
@@ -559,7 +570,7 @@ async function loadAudit() {
 function label(action) {
   return ({
     login: '登录', logout: '退出', ban: '禁用账号', unban: '启用账号',
-    reset_password: '设置密码', export: '导出记录', aggregate: '汇总计算', compare: '销售与放蛋对账',
+    reset_angel:'天使大群清零', reset_password: '设置密码', export: '导出记录', aggregate: '汇总计算', compare: '销售与放蛋对账',
     assign_account: '分给管理员 2', reclaim_account: '收回管理',
   })[action] || action;
 }

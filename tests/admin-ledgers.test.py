@@ -47,6 +47,26 @@ class Handler:
     def _json(self, status, data): self.response = (status, data)
 
 class AdminBooksTest(unittest.TestCase):
+    def test_angel_reset_requires_auth_csrf_and_confirmation(self):
+        for authenticated, csrf, body, expected in [
+                (False, True, {}, 401), (True, False, {}, 403),
+                (True, True, [], 400), (True, True, {'team_id': A}, 400)]:
+            h=Handler(authenticated=authenticated);h.path='/admin/api/teams/reset-angel';h.body=body;h._csrf_ok=lambda claims:csrf
+            with patch.object(admin,'supabase') as rpc:
+                admin.Handler.do_POST(h);self.assertEqual(h.response[0],expected);rpc.assert_not_called()
+
+    def test_both_admins_reset_only_through_service_rpc_with_their_own_audit(self):
+        for slot in ['primary','secondary']:
+            h=Handler();h.admin_slot=slot;h.path='/admin/api/teams/reset-angel';h.body={'team_id':A,'mutation':B,'expected_revision':3,'confirm':'清零天使大群'}
+            with patch.object(admin,'supabase',return_value=(200,{'ok':True,'revision':4,'replayed':False})) as rpc,patch.object(admin,'audit') as audit:
+                admin.Handler.do_POST(h);self.assertEqual(h.response[0],200);self.assertEqual(rpc.call_args.kwargs['body']['p_admin_slot'],slot);self.assertEqual(rpc.call_args.kwargs['body']['p_expected_revision'],3);self.assertEqual(audit.call_args.kwargs['admin_slot'],slot)
+
+    def test_reset_conflict_and_unknown_outcome_are_not_reported_as_success(self):
+        for result,expected in [((400,{'message':'TALLY_CONFLICT'}),409),((400,{'message':'TALLY_RESET_TARGET'}),400),((503,{}),503)]:
+            h=Handler();h.path='/admin/api/teams/reset-angel';h.body={'team_id':A,'mutation':B,'expected_revision':3,'confirm':'清零天使大群'}
+            with patch.object(admin,'supabase',return_value=result),patch.object(admin,'audit'):
+                admin.Handler.do_POST(h);self.assertEqual(h.response[0],expected)
+
     def test_activity_ignores_recommendation_only_saves_and_detects_real_ledger_edits(self):
         current = payload()
         first = admin.account_activity(current)

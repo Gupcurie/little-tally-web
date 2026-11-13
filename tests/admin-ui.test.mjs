@@ -180,3 +180,12 @@ test('aggregate tables align account columns and offer result-only or full-proce
 
 
 test('security opens its own admin panel with full IP, time, behavior and a manual block action',async()=>{const nodes=await loadPage();nodes['security-panel'].hidden=true;await nodes['security-open'].listeners.click();assert.equal(nodes['security-panel'].hidden,false);assert.match(nodes['security-body'].textContent,/198\.51\.100\.24/);assert.match(nodes['security-body'].textContent,/访问被拒绝/);assert.match(nodes['security-body'].textContent,/198\.51\.100\.25（当前连接）/);assert.match(nodes['security-body'].textContent,/已封禁 0 个 IP/);assert.equal((nodes['security-body'].textContent.match(/封禁此IP/g)||[]).length,1);});
+
+test('reset is offered only on eligible angel detail and requires exact confirmation',async()=>{
+ const nodes=await loadPage(),ctx=nodes.context;vm.runInContext('openDetail(ACCOUNTS[0])',ctx);assert.doesNotMatch(nodes['d-actions'].textContent,/清零/);
+ vm.runInContext("ACCOUNTS[0].can_reset_angel=true;openDetail(ACCOUNTS[0])",ctx);assert.match(nodes['d-actions'].textContent,/清零天使大群/);
+ let writes=0;ctx.window.prompt=()=>null;ctx.crypto={randomUUID:()=>C.uid()};const original=ctx.fetch;ctx.fetch=async(url,opts)=>{if(url.endsWith('/reset-angel')){writes++;return {status:200,ok:true,json:async()=>({ok:true,revision:4})};}return original(url,opts);};
+ const button=nodes['d-actions'].children.at(-1);await button.listeners.click();assert.equal(writes,0);
+ ctx.window.prompt=()=> '打错';await button.listeners.click();assert.equal(writes,0);
+ ctx.window.prompt=()=> '清零天使大群';await button.listeners.click();assert.equal(writes,1);assert.match(nodes.error.textContent,/已清零/);
+});
