@@ -184,7 +184,7 @@ test('security opens its own admin panel with full IP, time, behavior and a manu
 test('reset is offered only on eligible angel detail and requires exact confirmation',async()=>{
  const nodes=await loadPage(),ctx=nodes.context;vm.runInContext('openDetail(ACCOUNTS[0])',ctx);assert.doesNotMatch(nodes['d-actions'].textContent,/清零/);
  vm.runInContext("ACCOUNTS[0].can_reset_angel=true;openDetail(ACCOUNTS[0])",ctx);assert.match(nodes['d-actions'].textContent,/清零天使大群/);
- let writes=0;ctx.window.prompt=()=>null;ctx.crypto={randomUUID:()=>C.uid()};const original=ctx.fetch;ctx.fetch=async(url,opts)=>{if(url.endsWith('/reset-angel')){writes++;return {status:200,ok:true,json:async()=>({ok:true,revision:4})};}return original(url,opts);};
+ let writes=0;ctx.window.prompt=()=>null;ctx.loadRecommendationCore=async()=>C;const original=ctx.fetch;ctx.fetch=async(url,opts)=>{if(url.endsWith('/reset-angel')){writes++;return {status:200,ok:true,json:async()=>({ok:true,revision:4})};}return original(url,opts);};
  const button=nodes['d-actions'].children.at(-1);await button.listeners.click();assert.equal(writes,0);
  ctx.window.prompt=()=> '打错';await button.listeners.click();assert.equal(writes,0);
  ctx.window.prompt=()=> '清零天使大群';await button.listeners.click();assert.equal(writes,1);assert.match(nodes.error.textContent,/已清零/);
