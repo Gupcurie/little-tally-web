@@ -30,7 +30,7 @@ function collect(books,bounds,canonical){
   for(const r of book?.records||[]){
    if(!Number.isFinite(r.at)||r.at<bounds.start||r.at>bounds.end||r.origin==='inherit'||!Number.isSafeInteger(r.delta)||!r.delta)continue;
    const name=names.get(r.itemId);if(!name)continue;
-   const event={...r,name,key:canonical(name),order:order++};events.set(r.id||'missing-'+event.order,event);
+   const event={...r,name,key:canonical(name,r.itemId),order:order++};events.set(r.id||'missing-'+event.order,event);
   }
  }
  const sorted=[...events.values()].sort((a,b)=>a.at-b.at||a.order-b.order),groups=new Map();
@@ -107,8 +107,11 @@ function rankLocations(source,other,key,anchors,deficit,buffer,brackets){
  }).sort((a,b)=>a.score-b.score||a.to-a.from-(b.to-b.from)||a.at-b.at);
  return {locations:locations.slice(0,20),candidateCount:locations.length,ambiguous:na>deficit&&locations.length>1,ranked};
 }
-export function reconcileDaily(eggBooks,salesBooks,{now=Date.now(),aliases=[],buffer=20}={}){
- const bounds=dayBounds(now),canonical=aliasesFor(aliases),placed=collect(eggBooks,bounds,canonical),sold=collect(salesBooks,bounds,canonical),keys=new Set([...placed.groups.keys(),...sold.groups.keys()]);
+export function reconcileDaily(eggBooks,salesBooks,{now=Date.now(),aliases=[],links=null,buffer=20}={}){
+ const bounds=dayBounds(now),canonical=aliasesFor(aliases),maps={sales:new Map(),egg:new Map()};
+ if(links)links.groups.forEach((group,index)=>{for(const side of ['sales','egg'])for(const id of group[side])maps[side].set(id,'pair-'+index);});
+ const key=side=>links?(name,id)=>maps[side].get(id)||'single-'+side+'-'+id:canonical;
+ const placed=collect(eggBooks,bounds,key('egg')),sold=collect(salesBooks,bounds,key('sales')),keys=new Set([...placed.groups.keys(),...sold.groups.keys()]);
  const rows=[...keys].map(key=>{const a=placed.groups.get(key),b=sold.groups.get(key),names=[...new Set([...(a?.names||[]),...(b?.names||[])])];const eggs=a?.net||0,sales=b?.net||0;return {key,name:names.join(' / '),names,eggs,sales,matched:Math.min(Math.max(0,eggs),Math.max(0,sales)),difference:eggs-sales,correction:(a?.priorReduction||0)+(b?.priorReduction||0)};});
  const certain=[],estimated=[];
  for(const row of rows)if(row.eggs>0&&row.eggs===row.sales){

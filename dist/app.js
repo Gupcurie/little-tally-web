@@ -7,6 +7,7 @@ import * as Ops from './operations.js';
 import {installItemDrag} from './reorder.js';
 import {startReconciliation} from './reconcile.js';
 import {reconcileDaily,dailyMarkup,aliasControls,mergeAliases,validAliases,dayBounds} from './reconcile-daily.js';
+import {matchingItems,validMatching,coverage,prepareMatching,connectMatching,soloMatching,mappingMarkup,drawMatchingLines} from './matching.js';
 import {ROLES,TUTORIALS,tutorialFor,chooseRole,newestProfile,validProfile,beijingDay} from './onboarding.js';
 
 const icons={
@@ -21,17 +22,18 @@ const color=item=>palette[Math.abs(Number(item.color)||0)%palette.length];
 const main=document.querySelector('#main'),nav=document.querySelector('.bottom-nav'),sheet=document.querySelector('#sheet'),sheetContent=document.querySelector('#sheet-content'),fileInput=document.querySelector('#import-file');
 const localMode=new URLSearchParams(location.search).get('local')==='1';
 const ledger=localMode?new BrowserLedger():new CloudLedger(cloudConfig);
-let state={page:['count','egg','history','stats','ratio','settings'].includes(location.hash.slice(1))?location.hash.slice(1):'egg',book:'sales',range:0,keyword:'',direction:0,historyLimit:80,selection:new Set(),selecting:false,itemID:null,ratioMode:'parts',ratioSelected:new Set(),ratioValues:Object.create(null),ratioPlan:null,ratioError:null,authMode:'login',baseID:'',selectedHour:null};
+let state={page:['count','egg','history','stats','ratio','match','settings'].includes(location.hash.slice(1))?location.hash.slice(1):'egg',book:'sales',range:0,keyword:'',direction:0,historyLimit:80,selection:new Set(),selecting:false,itemID:null,ratioMode:'parts',ratioSelected:new Set(),ratioValues:Object.create(null),ratioPlan:null,ratioError:null,authMode:'login',baseID:'',selectedHour:null};
 let eggPlanSyncTimer,eggPlanSyncTask=null;
-let itemDrag=null,orderSaving=false,renderedDay=null;
-let reconciliationTimer,comparisonCache=null,reconciliationData=null,reconcileMergeBusy=false;
+let itemDrag=null,orderSaving=false,renderedDay=null,dragDeferred=false;
+let reconciliationTimer,comparisonCache=null,reconciliationData=null,matchingUI=null;
 let toastTimer,formSubmit=null,restoreExpected=null,backupReady=null;
 let roleAccount=null,roleProfile=null,roleRequired=false,roleBusy=false,roleQueued=false,tutorialRole=null,tutorialStep=0,featureScope=null;
 const onboarding=document.createElement('dialog');onboarding.id='onboarding';onboarding.className='onboarding-dialog';onboarding.setAttribute('aria-labelledby','onboarding-title');document.body.append(onboarding);
+icons.match='<path d="M5 6h4m6 0h4M5 18h4m6 0h4M9 6c4 0 2 12 6 12M9 18c4 0 2-12 6-12"/><circle cx="4" cy="6" r="2"/><circle cx="20" cy="6" r="2"/><circle cx="4" cy="18" r="2"/><circle cx="20" cy="18" r="2"/>';
 icons.egg='<path d="M12 3c3.6 0 6.5 4.4 6.5 9.2 0 4.4-2.9 8.3-6.5 8.3S5.5 16.6 5.5 12.2C5.5 7.4 8.4 3 12 3z"/><path d="M9.5 9.5c.6-1.2 1.5-2 2.5-2"/>';
-const TAB_LABELS={count:'记数',egg:'放蛋',history:'历史',stats:'统计',ratio:'比例',settings:'设置'};
-const DEFAULT_TABS=['count','egg','history','stats','ratio','settings'];
-const loadTabs=()=>{try{const raw=JSON.parse(localStorage.getItem('little-tally-tabs')||'null');if(Array.isArray(raw)&&raw.length===DEFAULT_TABS.length&&DEFAULT_TABS.every(k=>raw.includes(k)))return raw;}catch{}return DEFAULT_TABS.slice();};
+const TAB_LABELS={count:'记数',egg:'放蛋',history:'历史',stats:'统计',ratio:'比例',match:'匹配比对',settings:'设置'};
+const DEFAULT_TABS=['count','egg','history','stats','ratio','match','settings'];
+const loadTabs=()=>{try{const raw=JSON.parse(localStorage.getItem('little-tally-tabs')||'null');if(Array.isArray(raw)){const kept=[...new Set(raw.filter(k=>DEFAULT_TABS.includes(k)))];if(!kept.includes('match'))kept.splice(Math.max(0,kept.indexOf('settings')),0,'match');for(const k of DEFAULT_TABS)if(!kept.includes(k))kept.push(k);return kept;}}catch{}return DEFAULT_TABS.slice();};
 const saveTabs=tabs=>{try{localStorage.setItem('little-tally-tabs',JSON.stringify(tabs));}catch{}};
 const loadEggMode=()=>{try{const raw=localStorage.getItem('little-tally-egg-mode');return raw===null?true:raw==='1';}catch{return true;}};
 const saveEggMode=value=>{try{localStorage.setItem('little-tally-egg-mode',value?'1':'0');}catch{}};
@@ -49,7 +51,7 @@ function book(){return ledger.state[state.book];}
 function toast(text){const node=document.querySelector('#toast');node.textContent=text;node.classList.add('show');clearTimeout(toastTimer);toastTimer=setTimeout(()=>node.classList.remove('show'),3600);}
 function timeBadge(showTime=true){return ledger.savedAt?`${localMode?'本机已保存':'云端已保存'}${showTime?' '+C.clock(ledger.savedAt):''}`:localMode?'自动保存到本机':'登录后自动保存到云端';}
 function render(){
- if(itemDrag?.active)return;
+ if(itemDrag?.engaged){dragDeferred=true;return;}dragDeferred=false;
  renderedDay=C.day(Date.now());
  const previousChart=main.querySelector('.activity-scroll');
  const previousChartScroll=previousChart?.scrollLeft;
@@ -70,7 +72,7 @@ function render(){
  if(state.eggItemID&&state.page==='egg')main.innerHTML=eggDetailView();
  else if(state.itemID&&state.page==='count')main.innerHTML=detailView();
  else{
-  try{main.innerHTML=({count:countView,egg:eggView,history:historyView,stats:statsViewNew,ratio:ratioView,settings:settingsView}[state.page]||countView)();}
+  try{main.innerHTML=({count:countView,egg:eggView,history:historyView,stats:statsViewNew,ratio:ratioView,settings:settingsView,match:matchingView}[state.page]||countView)();}
   catch(err){state.eggItemID=null;state.page='count';main.innerHTML=countView();toast('这个页面刚刚没打开，已回到记数页。');}
  }
  if((localMode||ledger.signedIn)&&!ledger.loading){const scope=document.createElement('div');scope.className='workspace-bar';scope.innerHTML=workspaceBar();if(state.page==='settings')main.insertAdjacentHTML('afterbegin',roleSettingsView()+daySettingsView());if(!main.firstElementChild?.classList.contains('count-dashboard'))main.prepend(scope);}
@@ -164,7 +166,7 @@ onboarding.addEventListener('click',async event=>{
     await saveRoleProfile({...prior,version:2,day:beijingDay(),books:{...state.books},tutorialPending:false,updatedAt:Date.now()});roleRequired=false;closeOnboarding();render();
    }else{
     const outsideBooks=d?roleProfile?.outsideBooks||{sales:true,stock:true,egg:true}:{...state.books},outsideRole=d?roleProfile?.outsideRole||'dismantle':roleProfile?.outsideRole||roleProfile?.role||'dismantle';
-    if(kind&&!localMode){const team=await ledger.joinDailyRoom(kind,role);await ledger.selectWorkspace(team);}
+    if(kind&&!localMode){const team=await ledger.joinDailyRoom(kind,role);await ledger.selectWorkspace(team,{joined:true});}
     await saveRoleProfile({...chooseRole(role,newbie,Date.now(),kind),outsideBooks,outsideRole});roleRequired=false;featureScope=null;state.books={...roleProfile.books};state.book=ROLES[role].book;resetWorkspaceUI();state.page=ROLES[role].page;history.replaceState(null,'','#'+state.page);
     if(newbie)showTutorial(role);else{closeOnboarding();render();}
    }
@@ -206,7 +208,7 @@ function layoutVars(){
  const height=Math.round(nav.getBoundingClientRect().height);
  document.documentElement.style.setProperty('--nav-h',(height>0?height:64)+'px');
 }
-new ResizeObserver(()=>{layoutVars();fitItemGrid();fitEggGrid();}).observe(main);
+new ResizeObserver(()=>{layoutVars();fitItemGrid();fitEggGrid();if(state.page==='match')drawMatchingLines(main);}).observe(main);
 function loginView(){const registering=state.authMode==='register';return `<section class="hero login-hero"><img class="login-mars-mark" src="./icon-192.png" alt="火星演唱会标志"><div><h1>拆弹专家</h1><p class="login-description">放蛋 · 销售记数 · 库存点数</p></div></section><section class="panel login-panel"><h2>${ledger.loading?'正在打开你的账本…':registering?'注册账户':'登录账户'}</h2><p class="inline-caption">${registering?'只需用户名和密码，不需要邮箱。':'用用户名和密码，打开自己的账本。'}</p>${ledger.error?`<div class="soft-message error">${e(ledger.error)}</div>`:''}${!ledger.loading?`<form id="account-form"><label class="field-label" for="account-username">用户名</label><input class="field-input" id="account-username" name="username" type="text" autocapitalize="none" spellcheck="false" autocomplete="username" placeholder="3–24 位字母、数字或下划线" minlength="3" maxlength="24" pattern="[A-Za-z0-9_]{3,24}" required ${ledger.configured?'':'disabled'}><label class="field-label" style="margin-top:18px" for="account-password">密码</label><input class="field-input" id="account-password" name="password" type="password" autocomplete="${registering?'new-password':'current-password'}" placeholder="${registering?'至少 6 位，可用纯数字或纯字母':'请输入密码'}" ${registering?'minlength="6"':''} maxlength="128" required ${ledger.configured?'':'disabled'}>${registering?'<label class="field-label" style="margin-top:18px" for="account-confirm">确认密码</label><input class="field-input" id="account-confirm" name="confirm" type="password" autocomplete="new-password" placeholder="再输入一次密码" minlength="6" maxlength="128" required>':''}<button class="primary-button" type="submit" style="margin-top:22px" ${ledger.configured?'':'disabled'}>${icon('shield')}${registering?'注册并进入':'登录'}</button><p class="hint">用户名不区分大小写。${registering?'请保存好用户名和密码；此版本不通过邮箱找回密码。':'不同账户的记录单独保存。'}</p><div id="account-message" class="sheet-error" role="status"></div></form><button class="small-button" style="width:100%;margin-top:14px" data-action="auth-mode">${registering?'已有账户？去登录':'还没有账户？注册一个'}</button>${!ledger.configured?'<div class="soft-message warn">账户服务正在准备中，暂时不能注册或同步云端记录。</div>':''}`:''}</section><section class="panel" style="margin-top:18px"><button class="small-button" style="width:100%" data-action="check-connection">检查连接</button><div id="connection-message" class="hint" role="status" style="white-space:pre-line">遇到打不开、注册或登录失败时，可检查当前网络。</div></section><div class="login-features"><span>${icon('check')}独立账户</span><span>${icon('check')}云端保存</span><span>${icon('check')}随时导出</span></div><p class="hint" style="text-align:center">已有本机数据？登录后可从设置导入备份。</p><button class="small-button" style="width:100%;margin-top:14px" data-action="local-mode">本机体验（不含云端同步）</button>`;}
 
 function pageHeading(eyebrow,name,subtitle){return `<h1 class="page-title">${e(name)}</h1>${subtitle?`<p class="page-subtitle">${e(subtitle)}</p>`:''}`;}
@@ -640,59 +642,82 @@ function comparisonScope(){return JSON.stringify([localMode?'local':ledger.user?
 function dailyComparisonData(){
  const scope=comparisonScope();if(reconciliationData?.scope!==scope)reconciliationData={scope,archives:[],loaded:false,loading:false,error:null,version:0};return reconciliationData;
 }
+function localMatchingSource(){
+ const bounds=dayBounds(),archives=(ledger.state.periodArchives||[]).filter(p=>p.endedAt>=bounds.start).sort((a,b)=>a.endedAt-b.endedAt).map(p=>p.payload),config=ledger.state.reconciliation?.mapping||null;
+ const source={revision:ledger.state.revision,egg_books:[...archives.map(p=>p.egg),ledger.state.egg],sales_books:[...archives.map(p=>p.sales),ledger.state.sales],config,hash:JSON.stringify(config),generated_at:Date.now(),aliases:ledger.state.reconciliation?.aliases||[]};
+ const items=matchingItems(source);source.signature=JSON.stringify(['sales','egg'].map(side=>items[side].map(i=>i.id).sort()));return source;
+}
 function reconciliationResult(){
- const data=dailyComparisonData(),day=dayBounds().day;
- if(comparisonCache?.snapshot===ledger.state&&comparisonCache?.data===data&&comparisonCache?.version===data.version&&comparisonCache?.day===day)return comparisonCache.result;
- const d=dailyRoom(),remote=data.remote||{};
- const result=reconcileDaily(d?remote.egg:[...data.archives.map(p=>p.egg),ledger.state.egg],d?remote.sales:[...data.archives.map(p=>p.sales),ledger.state.sales],{aliases:ledger.state.reconciliation?.aliases||[]});
- comparisonCache={snapshot:ledger.state,data,version:data.version,day,result};return result;
+ const data=dailyComparisonData(),source=data.source;if(!source||!validMatching(source.config)||source.config.signature!==source.signature||!coverage(matchingItems(source),source.config).complete)return null;
+ if(comparisonCache?.source===source)return comparisonCache.result;
+ const result=reconcileDaily(source.egg_books,source.sales_books,{now:source.generated_at,links:source.config});comparisonCache={source,result};return result;
 }
 function reconciliationStatus(){
  if(!dailyRoom()&&(!state.books.sales||!state.books.egg))return '';
  const data=dailyComparisonData(),result=reconciliationResult();
- const label=!data.loaded||data.loading?'正在读取今日对账…':data.error?'对账读取不完整':result.status==='review'?'今日对账待核对 '+(result.waiting+result.unmatched):result.waiting?'对账 · 待对应 '+result.waiting:'今日数量一致';
- return `<button type="button" class="reconcile-status ${data.error?'error':result.status}" data-action="reconcile-open">${label}</button>`;
+ const label=!result?'先匹配物品':data.loading?'正在同步今日对账…':data.error?'对账读取不完整':result.status==='review'?'今日对账待核对 '+(result.waiting+result.unmatched):result.waiting?'对账 · 待对应 '+result.waiting:'今日数量一致';
+ return `<button type="button" class="reconcile-status ${data.error?'error':result?.status||'pending'}" data-action="reconcile-open">${label}</button>`;
 }
 async function queueReconciliationStart(force=false){
- if(ledger.readOnly||ledger.loading||!dailyRoom()&&(!state.books.sales||!state.books.egg))return;
- const data=dailyComparisonData();if(data.loading||data.loaded&&!force&&(!dailyRoom()||data.revision>=ledger.cloudRevision))return;
- data.loading=true;data.error=null;main.querySelectorAll('.reconcile-status').forEach(node=>node.textContent='正在同步今日对账…');
- const showing=sheetContent.querySelector('.reconciliation-content');if(showing&&data.loaded&&!showing.querySelector('[data-reconcile-sync]'))showing.insertAdjacentHTML('afterbegin','<p class="hint" data-reconcile-sync>正在同步最新记录，下面为上次完整结果。</p>');
+ if(ledger.readOnly||ledger.loading||state.page!=='match'&&!dailyRoom()&&(!state.books.sales||!state.books.egg))return;
+ const data=dailyComparisonData();if(data.loading||data.loaded&&data.revision===Number(ledger.cloudRevision??ledger.state.revision)&&!force)return;
+ if(!localMode&&!ledger.workspace&&ledger.cloudRevision===0&&state.page!=='match')return;
+ data.loading=true;data.error=null;
  try{
-  if(dailyRoom()){const remote=await ledger.dailyComparison();if(reconciliationData!==data)return;data.remote=remote;data.revision=Number(remote.revision);data.loaded=true;data.version++;return;}
-  const bounds=dayBounds(),periods=(await periodList()).filter(p=>p.endedAt>=bounds.start&&p.startedAt<=bounds.end).sort((a,b)=>a.endedAt-b.endedAt),archives=[];
-  for(let i=0;i<periods.length;i+=4){
-   const batch=await Promise.all(periods.slice(i,i+4).map(async p=>localMode?p.payload:await ledger.request('rpc/tally_period_read',{method:'POST',body:{p_id:p.id}})));
-   if(reconciliationData!==data)return;archives.push(...batch);
-  }
-  if(reconciliationData!==data)return;data.archives=archives;data.loaded=true;data.version++;
- }catch(err){if(reconciliationData===data){data.error=err.message||'今日历史读取失败';data.loaded=true;data.version++;}}
+  if(!localMode&&!ledger.workspace&&ledger.cloudRevision===0){if(eggPlanSyncTask)await eggPlanSyncTask.catch(()=>{});if(ledger.saving){data.loaded=false;return;}if(ledger.cloudRevision===0)await ledger.commit(()=>{});}
+  const source=localMode?localMatchingSource():await ledger.matchingRead();if(reconciliationData!==data)return;
+  data.source=source;data.revision=Number(source.revision??ledger.cloudRevision);data.loaded=true;data.version++;
+ }catch(err){if(reconciliationData===data){data.error=err.message||'今日记录读取失败';data.loaded=true;}}
  finally{data.loading=false;if(reconciliationData===data)render();}
 }
-function comparisonContent(){
- const data=dailyComparisonData(),aliases=ledger.state.reconciliation?.aliases||[];
- if(!data.loaded)return '<p>正在读取今天的完整记录（包括已结算分段）…</p>';
- if(data.error)return `<p class="sheet-error">今日记录未完整读取：${e(data.error)}。请刷新对账后再判断差额。</p>`;
- const result=reconciliationResult();return dailyMarkup(result)+aliasControls(result,aliases);
+function ensureMatchingUI(){
+ const data=dailyComparisonData(),source=data.source;if(!source)return null;
+ const items=matchingItems(source);
+ if(!matchingUI||matchingUI.scope!==data.scope||matchingUI.signature!==source.signature){
+  const prior=matchingUI?.scope===data.scope?matchingUI.draft:null;
+  matchingUI={scope:data.scope,signature:source.signature,baseHash:source.hash,stage:'setup',draft:prepareMatching(items,prior||source.config,source.aliases),selection:{sales:new Set(),egg:new Set()},dirty:false,error:'',saving:false};
+ }else if(matchingUI.baseHash!==source.hash&&!matchingUI.saving){
+  if(!matchingUI.dirty||matchingUI.stage==='result'){matchingUI.stage='setup';matchingUI.draft=prepareMatching(items,source.config,source.aliases);matchingUI.baseHash=source.hash;matchingUI.selection={sales:new Set(),egg:new Set()};}
+  matchingUI.error='匹配关系已更新，请检查连线后确认。';
+ }
+ return matchingUI;
+}
+function matchingView(){
+ const data=dailyComparisonData();if(data.error)return `<h1 class="page-title">匹配比对</h1><p class="sheet-error">读取不完整：${e(data.error)}</p><button class="primary-button" data-action="match-refresh">重新读取</button>`;
+ if(!data.source)return '<h1 class="page-title">匹配比对</h1><p class="hint">正在读取两侧物品和今日记录…</p>';
+ const ui=ensureMatchingUI(),items=matchingItems(data.source);
+ return `<section class="matching-page"><div class="heading-row"><h1 class="page-title">${ui.stage==='setup'?'物品匹配':'今日匹配比对'}</h1><button type="button" class="small-button" data-action="match-refresh">刷新数据</button></div>${ui.error?`<p class="sheet-error" role="alert">${e(ui.error)}</p>`:''}${ui.stage==='setup'?mappingMarkup(items,ui.draft,ui.selection):`<button type="button" class="small-button" data-action="match-edit">修改物品连线</button>${dailyMarkup(reconciliationResult())}`}</section>`;
 }
 function showReconciliation(){
- showSheet('今日销售与放蛋对账',`<button type="button" class="small-button" data-action="reconcile-refresh">刷新今日对账</button><div class="reconciliation-content">${comparisonContent()}</div>`);queueReconciliationStart();
+ if(state.bundle){toast('请先确认或取消这组多蛋购买。');return;}
+ if(sheet.open)closeSheet();state.page='match';matchingUI=null;history.replaceState(null,'','#match');render();queueReconciliationStart(true);
 }
-function refreshReconciliationDetail(){
- const content=sheetContent.querySelector('.reconciliation-content');
- if(sheet.open&&content){const first=content.querySelector('[data-alias-first]')?.value,second=content.querySelector('[data-alias-second]')?.value,opened=[...content.querySelectorAll('details[open]')].map(n=>n.dataset.issueKey);content.innerHTML=comparisonContent();for(const [selector,value] of [['[data-alias-first]',first],['[data-alias-second]',second]]){const field=content.querySelector(selector);if(field&&value)field.value=value;}content.querySelectorAll('details').forEach(n=>{if(opened.includes(n.dataset.issueKey))n.open=true;});}
+function refreshReconciliationDetail(){if(state.page==='match')requestAnimationFrame(()=>drawMatchingLines(main));}
+async function matchingAction(a,node){
+ if(!a.startsWith('match-'))return false;
+ const data=dailyComparisonData(),ui=ensureMatchingUI();if(!ui&&a!=='match-refresh')return true;
+ if(ui?.saving)return true;
+ if(a==='match-refresh'){await queueReconciliationStart(true);return true;}
+ if(a==='match-edit'){ui.stage='setup';ui.dirty=false;render();return true;}
+ if(a==='match-select'){const set=ui.selection[node.dataset.side];set.has(node.dataset.id)?set.delete(node.dataset.id):set.add(node.dataset.id);render();return true;}
+ if(a==='match-connect'||a==='match-solo'){
+  const args=[ui.draft,[...ui.selection.sales],[...ui.selection.egg]];ui.draft=a==='match-connect'?connectMatching(...args):soloMatching(...args);ui.dirty=true;ui.error='';ui.selection={sales:new Set(),egg:new Set()};render();return true;
+ }
+ if(a==='match-unlink'){ui.draft.groups.splice(Number(node.dataset.index),1);ui.dirty=true;render();return true;}
+ if(a==='match-auto'){ui.draft=prepareMatching(matchingItems(data.source),null,data.source.aliases);ui.baseHash=data.source.hash;ui.dirty=true;ui.error='';ui.selection={sales:new Set(),egg:new Set()};render();return true;}
+ if(a==='match-confirm'){
+  if(!coverage(matchingItems(data.source),ui.draft).complete){ui.error='还有物品没有对应，请连接或标为单独核对。';render();return true;}
+  ui.saving=true;ui.error='';node.disabled=true;const scope=data.scope;
+  try{
+   if(localMode){await ledger.commit(s=>{s.reconciliation={...(s.reconciliation||startReconciliation(s.egg,s.sales)),mapping:{...ui.draft,signature:ui.signature}};});data.source=localMatchingSource();}
+   else data.source=await ledger.matchingSave(ui.draft,ui.signature,ui.baseHash);
+   if(dailyComparisonData().scope!==scope)return true;
+   data.version++;ui.baseHash=data.source.hash;ui.dirty=false;ui.stage='result';
+  }catch(err){ui.error=err.message||'没有保存成功，请重试。';ui.stage='setup';if(err.code?.startsWith('TALLY_MATCHING_')){ui.dirty=false;ui.saving=false;await queueReconciliationStart(true);}}
+  finally{ui.saving=false;render();}return true;
+ }
+ return true;
 }
-sheetContent.addEventListener('click',async event=>{
- const button=event.target.closest('[data-reconcile-merge],[data-reconcile-unmerge]');if(!button||reconcileMergeBusy)return;
- event.preventDefault();const content=button.closest('.reconciliation-content');if(!content)return;const scope=comparisonScope();
- try{
-  const current=ledger.state.reconciliation?.aliases||[],next=button.hasAttribute('data-reconcile-merge')?mergeAliases(current,content.querySelector('[data-alias-first]').value,content.querySelector('[data-alias-second]').value):current.filter((_,i)=>i!==Number(button.dataset.reconcileUnmerge));
-  reconcileMergeBusy=true;button.disabled=true;
-  await mutateState(snapshot=>{if(scope!==comparisonScope())throw Error('账本已切换，请重新打开对账。');snapshot.reconciliation={...(snapshot.reconciliation||startReconciliation(snapshot.egg,snapshot.sales)),aliases:next};});
-  refreshReconciliationDetail();
- }catch(err){const error=content.querySelector('.reconcile-alias-error');if(error)error.textContent=err.message;}
- finally{reconcileMergeBusy=false;if(button.isConnected)button.disabled=false;}
-});
 function workspaceControls(){
  return `<div class="count-scope-actions"><button class="small-button count-scope" data-action="${ledger.workspace?'workspace-details':'workspace-select'}" aria-label="${e(workspaceLabel())}"><span title="${e(workspaceLabel())}">${e(workspaceLabel())}</span></button><button type="button" class="small-button team-entry" data-action="workspace-select">组队/加入组队</button></div>`;
 }
@@ -756,12 +781,13 @@ async function featureAction(a,node){
  return false;
 }
 async function action(a,node){
+ if(await matchingAction(a,node))return;
  if(a==='role-select'||a==='tutorial-open'){
   if(state.bundle){toast('请先确认或取消这组多蛋购买。');return;}
   if(a==='role-select'||!roleProfile)showRoleChoice(false);else showTutorial(dailyRoom()?.role||roleProfile.outsideRole||roleProfile.role);return;
  }
  if(a==='reconcile-open'){showReconciliation();return;}
- if(a==='reconcile-refresh'){if(ledger.saving||reconcileMergeBusy)throw Error('请等保存完成后再刷新。');if(!localMode)await ledger.reload();await queueReconciliationStart(true);refreshReconciliationDetail();return;}
+ if(a==='reconcile-refresh'){await queueReconciliationStart(true);return;}
  if(a==='workspace-details'){await showTeamDetails();return;}
  if(a==='team-kick'||a==='team-dissolve'){
   if(node.dataset.team!==ledger.workspace?.id)throw Error('当前群已切换，请重新打开成员列表。');
@@ -783,7 +809,7 @@ async function action(a,node){
  if(a==='sync-cloud'){await ledger.reload();render();toast('已读取当前账户最新的云端记录。');return;}
  if(a==='logout'){confirmSheet('退出当前账户？','云端记录会保留。本页面和当前账户的本机备用副本会清除，下次登录会重新读取云端记录。',async()=>{await ledger.logout();state.itemID=null;state.selection.clear();state.ratioValues=Object.create(null);state.ratioSelected.clear();closeSheet();render();},'退出登录');return;}
  if(a==='close-sheet'){closeSheet();return;}
- if(a==='page'){if(state.page==='egg'&&['stats','history','ratio'].includes(node.dataset.page)&&!node.dataset.book)state.book='egg';if(node.dataset.book)state.book=node.dataset.book;state.page=node.dataset.page;state.itemID=null;state.eggItemID=null;state.eggSelecting=false;state.eggSelection.clear();state.keyword='';state.selection.clear();state.selecting=false;state.range=state.page==='history'?3:0;if(!['ratio','stats','history'].includes(state.page)&&state.book==='egg')state.book='sales';if(state.page==='ratio')loadRatio();history.replaceState(null,'','#'+state.page);render();window.scrollTo({top:0});return;}
+ if(a==='page'){if(node.dataset.page==='match')matchingUI=null;if(state.page==='egg'&&['stats','history','ratio'].includes(node.dataset.page)&&!node.dataset.book)state.book='egg';if(node.dataset.book)state.book=node.dataset.book;state.page=node.dataset.page;state.itemID=null;state.eggItemID=null;state.eggSelecting=false;state.eggSelection.clear();state.keyword='';state.selection.clear();state.selecting=false;state.range=state.page==='history'?3:0;if(!['ratio','stats','history','match'].includes(state.page)&&state.book==='egg')state.book='sales';if(state.page==='ratio')loadRatio();history.replaceState(null,'','#'+state.page);render();window.scrollTo({top:0});return;}
  if(a==='book'){state.book=node.dataset.book;state.itemID=null;state.eggItemID=null;state.keyword='';state.selection.clear();state.selecting=false;state.ratioPlan=null;state.selectedHour=null;state.eggDraft=null;if(state.book!=='egg')loadRatio();render();return;}
  if(a==='install'){installHelp();return;}
  if(a==='detail'){state.itemID=id;render();window.scrollTo({top:0});return;}
@@ -881,15 +907,18 @@ document.addEventListener('pointermove',event=>{
 },{passive:true});
 itemDrag=installItemDrag({
  root:main,
- canStart:()=>!ledger.readOnly&&!ledger.saving&&!ledger.loading&&!orderSaving&&!state.bundle,
+ canStart:()=>!ledger.readOnly&&!ledger.loading&&!orderSaving&&!state.bundle,
+ getContext:()=>JSON.stringify([ledger.user?.id,ledger.workspace?.id,state.page,state.book]),
  onPreview:()=>{if(state.page==='egg')fitEggGrid();},
- onCancel:render,
- onDrop:async({egg,order})=>{
+ onCancel:({active})=>{if(active)render();else if(dragDeferred)requestAnimationFrame(render);},
+ onDrop:async({egg,order,context})=>{
   orderSaving=true;
   const key=egg?'egg':state.book;
   try{
    clearTimeout(eggPlanSyncTimer);
    if(eggPlanSyncTask)await eggPlanSyncTask.catch(()=>{});
+   const deadline=Date.now()+15000;while(ledger.saving&&Date.now()<deadline)await new Promise(resolve=>setTimeout(resolve,40));
+   if(context!==JSON.stringify([ledger.user?.id,ledger.workspace?.id,state.page,state.book]))throw Error('账本已切换，未保存这次排序。');
    await ledger.commit(snapshot=>{
     const target=egg?C.ensureEgg(snapshot):snapshot[key];
     const current=egg?eggOrder(target):target.items.map(item=>item.id);
@@ -917,7 +946,7 @@ fileInput.addEventListener('change',async()=>{const file=fileInput.files?.[0];if
  confirmSheet('恢复全部记录？',`备份包含两个账本，共 ${n} 条记录。会替换本机的全部记数和库存，原本机记录会另存为恢复副本。`,async()=>{await ledger.restoreState(backupReady);backupReady=null;state.itemID=null;loadRatio();render();toast('全部记录已恢复。');},'恢复两个账本');
  }else{const kind=restoreExpected,b=C.decodeBackup(text,kind);confirmSheet(`恢复${title(kind)}？`,`包含 ${b.items.length} 类物品、${b.records.length} 条记录。替换对应账本，另一个账本不受影响。`,async()=>{await mutateState(s=>C.replaceBoundBook(s,kind,b));state.itemID=null;loadRatio();render();toast('备份已恢复。');},'替换此账本');}}catch(err){toast(err.message||'无法读取这份备份。');}});
 sheet.addEventListener('click',event=>{if(event.target===sheet){const r=sheet.getBoundingClientRect();if(event.clientY<r.top||event.clientX<r.left||event.clientX>r.right)closeSheet();}});
-window.addEventListener('hashchange',()=>{const p=location.hash.slice(1);if(['count','egg','history','stats','ratio','settings'].includes(p)){state.page=p;state.itemID=null;if(p==='ratio')loadRatio();render();}});
+window.addEventListener('hashchange',()=>{const p=location.hash.slice(1);if(['count','egg','history','stats','ratio','match','settings'].includes(p)){if(p==='match'&&state.page!=='match')matchingUI=null;state.page=p;state.itemID=null;if(p==='ratio')loadRatio();render();}});
 window.addEventListener('pageshow',()=>{if(ledger.db&&!ledger.saving)ledger.reload().then(render).catch(()=>{});});
 document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible'&&ledger.db&&!ledger.saving)ledger.reload().then(render).catch(()=>{});});
 if(localMode&&ledger.channel)ledger.channel.onmessage=()=>{if(!ledger.saving)ledger.reload().then(()=>{render();toast('已同步本机另一页面的最新记录。');}).catch(()=>{});};
@@ -927,3 +956,5 @@ if('serviceWorker'in navigator)navigator.serviceWorker.register('./sw.js').catch
 setInterval(()=>{if(document.visibilityState==='visible'&&!sheet.open&&['count','stats'].includes(state.page)&&renderedDay!==C.day(Date.now()))render();},30000);
 
 setInterval(async()=>{if(!localMode&&ledger.workspace&&ledger.signedIn&&!ledger.saving&&!ledger.loading&&(!sheet.open||Boolean(sheetContent.querySelector('.reconciliation-content')))&&!state.bundle&&!itemDrag?.active&&!orderSaving&&document.visibilityState==='visible'){try{await ledger.reload();}catch{}}},5000);
+
+setInterval(()=>{if(state.page==='match'&&document.visibilityState==='visible'&&!ledger.saving&&!ledger.loading&&!itemDrag?.engaged&&!matchingUI?.saving)queueReconciliationStart(true);},5000);

@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {CloudLedger} from '../dist/cloud.js';
 import * as C from '../dist/core.js';
 import {chooseRole} from '../dist/onboarding.js';
+import {DISMANTLE_ITEMS,PLACEMENT_ITEMS} from '../dist/presets.js';
 function fixture(){
  const sessions={A:{user:{id:'account-a',email:'a@example.invalid'},access_token:'token-a'},B:{user:{id:'account-b',email:'b@example.invalid'},access_token:'token-b'}};
  let session=sessions.A;const rows=new Map(),requests=[],caches=[];
@@ -19,6 +20,21 @@ function fixture(){
  return {sessions,setSession:s=>{session=s;},rows,requests,caches,auth,createClient,cacheFactory,fetcher,make(extra={}){return new CloudLedger({url:'https://backend.example.invalid',publishableKey:'public-test-key'},{createClient,fetcher,cacheFactory,...extra});}};
 }
 test('cloud acknowledgement persists records across a fresh login',async()=>{const f=fixture(),a=f.make();await a.init();const id=a.state.sales.items[0].id;await a.commit(s=>C.change(s.sales,id,1));const b=f.make();await b.init();assert.equal(C.counts(b.state.sales)[id],1);assert.equal(b.cloudRevision,1);a.channel?.close();b.channel?.close();});
+
+test('only an unsaved new account receives the new catalogs and existing rows retain their names',async()=>{
+ const f=fixture(),a=f.make();await a.init();assert.deepEqual(a.state.sales.items.map(i=>i.name),DISMANTLE_ITEMS);assert.deepEqual(a.state.egg.items.map(i=>i.name),PLACEMENT_ITEMS);
+ await a.commit(s=>{s.sales.items[0].name='原来的名称';});const b=f.make();await b.init();assert.equal(b.state.sales.items[0].name,'原来的名称');assert.equal(f.requests.filter(r=>r.url.endsWith('rpc/tally_save')).length,1);a.channel?.close();b.channel?.close();
+});
+
+test('matching reads and CAS updates use the selected scope without changing counts or ledger revision',async()=>{
+ const f=fixture(),a=f.make({fetcher:async(url,options)=>url.includes('rpc/tally_matching_')?Response.json({hash:'confirmed',body:JSON.parse(options.body)}):f.fetcher(url,options)});await a.init();const before=C.clone(a.state);
+ assert.equal((await a.matchingRead()).body.p_team_id,null);a.workspace={id:'team-matching'};
+ const out=await a.matchingSave({version:1,groups:[],singles:{sales:[],egg:[]}},'types','prior');assert.equal(out.body.p_team_id,'team-matching');assert.equal(out.body.p_signature,'types');assert.equal(out.body.p_expected_hash,'prior');assert.deepEqual(a.state,before);assert.equal(a.cloudRevision,0);a.channel?.close();
+});
+
+test('matching conflicts provide a specific recoverable message',async()=>{
+ const f=fixture(),a=f.make({fetcher:async(url,options)=>url.endsWith('rpc/tally_matching_save')?Response.json({message:'TALLY_MATCHING_CONFLICT'},{status:400}):f.fetcher(url,options)});await a.init();await assert.rejects(a.matchingSave({},'types','old'),err=>err.code==='TALLY_MATCHING_CONFLICT'&&/重新读取/.test(err.message));assert.equal(a.readOnly,false);a.channel?.close();
+});
 
 test('account role preferences persist across login without touching personal or group ledger revisions',async()=>{
  const f=fixture(),a=f.make();await a.init();const original=C.clone(a.state);

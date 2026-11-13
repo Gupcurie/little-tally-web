@@ -9,3 +9,5 @@ The ninth option changes no workspace, quantities or feature switches. Settings 
 Authenticated Auth metadata tally_onboarding is display preference only: version, day, role, books, tutorialPending, updatedAt, optional roomKind/outsideBooks/outsideRole. A per-account local mirror is used. No preferences grant permissions. Manual optional placement-stock enablement is stored in the authenticated daily membership, defaults off, and never links to sales or placements.
 
 See daily-rooms.md for permission/read/write contracts and daily-reconciliation.md for the order-independent comparison algorithm.
+
+The comparison tutorial now directs users to bottom navigation 匹配比对, select and connect both columns (including many-to-one), handle all categories, then confirm to view today’s results. Daily placement labels remain personal while group quantities are shared.

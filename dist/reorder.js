@@ -1,4 +1,4 @@
-export function installItemDrag({root, canStart, onDrop, onPreview, onCancel}) {
+export function installItemDrag({root, canStart, onDrop, onPreview, onCancel, getContext=()=>null}) {
   let gesture = null;
   let frame = 0;
   let suppressClick = false;
@@ -14,13 +14,14 @@ export function installItemDrag({root, canStart, onDrop, onPreview, onCancel}) {
   function clear() {
     const current = gesture;
     gesture = null;
+    if(!current)return null;
     clearTimeout(current.timer);
     cancelAnimationFrame(frame);
     frame = 0;
     current.card.classList.remove('item-drag-source');
     current.ghost?.remove();
     document.body.classList.remove('item-dragging');
-    if (root.hasPointerCapture(current.pointer)) root.releasePointerCapture(current.pointer);
+    try{if (root.hasPointerCapture(current.pointer)) root.releasePointerCapture(current.pointer);}catch{}
     return current;
   }
 
@@ -46,7 +47,8 @@ export function installItemDrag({root, canStart, onDrop, onPreview, onCancel}) {
   }
 
   function activate() {
-    if (!gesture || !canStart()) return;
+    if (!gesture) return;
+    if(!canStart()||!gesture.card.isConnected){cancel();return;}
     const {card, pointer} = gesture;
     const rect = card.getBoundingClientRect();
     const ghost = card.cloneNode(true);
@@ -59,13 +61,13 @@ export function installItemDrag({root, canStart, onDrop, onPreview, onCancel}) {
     document.body.appendChild(ghost);
     Object.assign(gesture, {
       active: true, ghost,
-      offsetX: gesture.startX - rect.left,
-      offsetY: gesture.startY - rect.top,
+      offsetX: gesture.x - rect.left,
+      offsetY: gesture.y - rect.top,
     });
     suppressClick = true;
     card.classList.add('item-drag-source');
     document.body.classList.add('item-dragging');
-    root.setPointerCapture(pointer);
+    try{root.setPointerCapture(pointer);}catch{cancel();return;}
     preview();
   }
 
@@ -80,49 +82,51 @@ export function installItemDrag({root, canStart, onDrop, onPreview, onCancel}) {
       card, container: card.parentElement, pointer: event.pointerId,
       startX: event.clientX, startY: event.clientY,
       x: event.clientX, y: event.clientY,
-      order: cards(card.parentElement).map(id), active: false,
+      order: cards(card.parentElement).map(id), active: false,context:getContext(),threshold:event.pointerType==='touch'?16:9,
     };
     gesture.timer = setTimeout(activate, 420);
   });
 
-  root.addEventListener('pointermove', event => {
+  window.addEventListener('pointermove', event => {
     if (!gesture || event.pointerId !== gesture.pointer) return;
     gesture.x = event.clientX;
     gesture.y = event.clientY;
     if (!gesture.active) {
-      if (Math.hypot(gesture.x - gesture.startX, gesture.y - gesture.startY) > 9) clear();
+      if (Math.hypot(gesture.x - gesture.startX, gesture.y - gesture.startY) > gesture.threshold)cancel();
       return;
     }
     event.preventDefault();
     if (!frame) frame = requestAnimationFrame(preview);
   }, {passive: false});
 
-  root.addEventListener('pointerup', event => {
+  window.addEventListener('pointerup', event => {
     if (!gesture || event.pointerId !== gesture.pointer) return;
     if (gesture.active) preview();
     const current = clear();
-    if (!current.active) return;
+    if (!current.active){onCancel({active:false});return;}
     const order = cards(current.container).map(id);
-    if (order.every((value, index) => value === current.order[index])) onCancel();
-    else onDrop({egg: Boolean(current.card.dataset.egg), order});
+    if (order.every((value, index) => value === current.order[index])) onCancel({active:true});
+    else onDrop({egg: Boolean(current.card.dataset.egg), order,context:current.context});
   });
 
   function cancel() {
     if (!gesture) return;
     const current = clear();
-    if (!current.active) return;
+    if (!current.active){onCancel({active:false});return;}
     for (const value of current.order) {
       const card = cards(current.container).find(node => id(node) === value);
       if (card) current.container.appendChild(card);
     }
-    onCancel();
+    onCancel({active:true});
   }
 
-  root.addEventListener('pointercancel', cancel);
+  window.addEventListener('pointercancel', cancel);
   root.addEventListener('lostpointercapture', cancel);
   document.addEventListener('keydown', event => { if (event.key === 'Escape') cancel(); });
   document.addEventListener('visibilitychange', () => { if (document.hidden) cancel(); });
   window.addEventListener('blur', cancel);
+  root.addEventListener('contextmenu',event=>{if(event.target.closest('.egg-open,.item-name,.item-number'))event.preventDefault();});
+  root.addEventListener('dragstart',event=>{if(gesture)event.preventDefault();});
   root.addEventListener('click', event => {
     if (!suppressClick) return;
     suppressClick = false;
@@ -130,5 +134,5 @@ export function installItemDrag({root, canStart, onDrop, onPreview, onCancel}) {
     event.stopImmediatePropagation();
   }, true);
 
-  return {get active() { return Boolean(gesture?.active); }};
+  return {get active() { return Boolean(gesture?.active); },get engaged(){return Boolean(gesture);}};
 }
