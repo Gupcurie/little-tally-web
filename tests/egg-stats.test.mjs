@@ -1,3 +1,4 @@
+import {productMarkup} from '../dist/concert-ui.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
@@ -102,7 +103,7 @@ function extracted(start,end){return source.slice(source.indexOf('function '+sta
 const escape=s=>String(s??'').replaceAll('<','&lt;').replaceAll('>','&gt;');
 test('the real card template places the denominator beside the round count at all sizes',()=>{
  const {egg,a,add}=fixture();add(a.id,1,'2026-11-01T02:00:00+08:00');
- const context=vm.createContext({C,state:{eggArrange:false},fmt:String,e:escape,sinceText:()=>'',icon:()=>''});
+ const context=vm.createContext({C,productMarkup,state:{eggArrange:false},fmt:String,e:escape,sinceText:()=>'',icon:()=>''});
  vm.runInContext(extracted('eggCard','eggPickKey'),context);
  const markup=context.eggCard(C.eggProgress(egg).find(i=>i.id===a.id),egg);
  assert.match(markup,/class="egg-current">1<\/span><small class="egg-denominator">\/6/);
@@ -112,7 +113,7 @@ test('the real card template places the denominator beside the round count at al
 test('an over-quota item keeps its global fraction, a full main bar and a yellow overflow bar',()=>{
  const egg=C.emptyEgg();C.eggAddItem(egg,'甲',8);C.eggAddItem(egg,'乙',2);
  C.eggSetCount(egg,egg.items[0].id,9);
- const context=vm.createContext({C,state:{eggArrange:false},fmt:String,e:escape,sinceText:()=>'',icon:()=>''});
+ const context=vm.createContext({C,productMarkup,state:{eggArrange:false},fmt:String,e:escape,sinceText:()=>'',icon:()=>''});
  vm.runInContext(extracted('eggCard','eggPickKey'),context);
  const markup=context.eggCard(C.eggProgress(egg)[0],egg);
  assert.match(markup,/第 1 轮 9\/8，累计 9 个/);
