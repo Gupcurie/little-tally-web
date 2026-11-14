@@ -12,14 +12,14 @@
  <link rel="manifest" href="./manifest.webmanifest">
  <link rel="apple-touch-icon" href="./icon-192.png">
  <link rel="icon" href="./icon.svg" type="image/svg+xml">
- <link rel="stylesheet" href="./style.css">
+ <link rel="stylesheet" href="./style.css"><link rel="stylesheet" href="./concert-ui.css">
  <title>拆弹专家</title>
 </head>
 <body>
- <div class="app-shell">
-  <header class="app-header"><a class="brand" href="#egg" aria-label="拆弹专家首页"><img class="brand-mark" src="./icon-192.png" alt="火星演唱会标志"><span>拆弹专家<small>MARS CONCERT</small></span></a><button class="icon-button" data-action="install" aria-label="添加到主屏幕"><span data-icon="install"></span></button></header>
+ <div class="app-shell"><aside id="concert-sidebar" class="concert-sidebar" aria-label="工作台"></aside>
+  <header class="app-header"><a class="brand" href="#egg" aria-label="拆弹专家首页"><img class="brand-mark" src="./assets/concert/mars-mark.webp" alt="火星演唱会标志"><span>拆弹专家<small>MARS CONCERT</small></span></a><div class="concert-breadcrumb"></div><div class="concert-header-scope"></div><button class="icon-button" data-action="install" aria-label="添加到主屏幕"><span data-icon="install"></span></button></header>
   <main id="main" tabindex="-1"><div class="loading">正在打开…</div></main>
-  <nav class="bottom-nav" aria-label="主要功能"></nav>
+  <aside id="concert-rail" class="concert-rail" hidden></aside><nav class="bottom-nav" aria-label="主要功能"></nav>
  </div>
  <dialog id="sheet" aria-labelledby="sheet-title"><div class="sheet-handle"></div><div id="sheet-content"></div></dialog>
  <div id="toast" role="status" aria-live="polite"></div>

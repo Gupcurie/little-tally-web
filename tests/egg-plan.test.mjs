@@ -1,3 +1,4 @@
+import {productMarkup} from '../dist/concert-ui.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
@@ -151,7 +152,7 @@ test('opening an older account upgrades the recommendation model without changin
 });
 test('the real page syncs recommendation metadata without count records and saves the next pick with a placement',async()=>{
  const egg=fixture(),{ctx}=page(egg),root={egg};let scheduled,commits=0;
- Object.assign(ctx,{localMode:false,eggPlanSyncTask:null,eggPlanSyncTimer:null,
+ Object.assign(ctx,{dailyExpired:()=>false,localMode:false,eggPlanSyncTask:null,eggPlanSyncTimer:null,
   setTimeout:fn=>{scheduled=fn;return 1;},clearTimeout:()=>{},sheet:{open:false},sheetContent:{querySelector:()=>null},toast:()=>{},render:()=>{},
   ledger:{signedIn:true,loading:false,readOnly:false,saving:false,commit:async fn=>{commits++;fn(root);C.validateEgg(egg);return root;}}});
  const original=Array.from(ctx.eggPlan(egg).ids);
@@ -174,7 +175,7 @@ test('plan sheet numbers each pick through the round end and supports further ch
 });
 test('recommended and last-placement outlines can coexist on the same card',()=>{
  const egg=fixture(),p=page(egg),id=egg.items[0].id;C.eggChange(egg,id,1);p.ctx.state.eggPick={id};
- Object.assign(p.ctx,{sinceText:()=>'',icon:()=>''});
+ Object.assign(p.ctx,{productMarkup,sinceText:()=>'',icon:()=>''});
  vm.runInContext(source.slice(source.indexOf('function eggCard('),source.indexOf('function eggPickKey(')),p.ctx);
  const html=p.ctx.eggCard(C.eggProgress(egg)[0],egg);
  assert.match(html,/egg-card flash recommended/);

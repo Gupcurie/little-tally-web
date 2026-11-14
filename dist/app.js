@@ -1,3 +1,4 @@
+import {concertTheme,themeAssets,productMarkup,installOutlineFilters} from './concert-ui.js';
 import {probeConnection} from './connection.js';
 import * as C from './core.js';
 import {BrowserLedger} from './storage.js';
@@ -22,6 +23,7 @@ const color=item=>palette[Math.abs(Number(item.color)||0)%palette.length];
 const main=document.querySelector('#main'),nav=document.querySelector('.bottom-nav'),sheet=document.querySelector('#sheet'),sheetContent=document.querySelector('#sheet-content'),fileInput=document.querySelector('#import-file');
 const localMode=new URLSearchParams(location.search).get('local')==='1';
 const ledger=localMode?new BrowserLedger():new CloudLedger(cloudConfig);
+installOutlineFilters();
 let state={page:['count','egg','history','stats','ratio','match','settings'].includes(location.hash.slice(1))?location.hash.slice(1):'egg',book:'sales',range:0,keyword:'',direction:0,historyLimit:80,selection:new Set(),selecting:false,itemID:null,ratioMode:'parts',ratioSelected:new Set(),ratioValues:Object.create(null),ratioPlan:null,ratioError:null,authMode:'login',baseID:'',selectedHour:null};
 let eggPlanSyncTimer,eggPlanSyncTask=null;
 let itemDrag=null,orderSaving=false,renderedDay=null,dragDeferred=false;
@@ -54,6 +56,7 @@ function timeBadge(showTime=true){return ledger.savedAt?`${localMode?'本机已�
 function render(){
  if(itemDrag?.engaged){dragDeferred=true;return;}dragDeferred=false;
  renderedDay=C.day(Date.now());
+ const previousMainScroll=main.scrollTop;
  const previousMatch=main.querySelector('[data-match-scope]'),previousMatchScope=previousMatch?.dataset.matchScope,previousMatchScroll=window.scrollY;
  if(previousMatch){if(issueExpansion.scope!==previousMatchScope)issueExpansion={scope:previousMatchScope,states:new Map()};previousMatch.querySelectorAll('[data-issue-key]').forEach(n=>issueExpansion.states.set(n.dataset.issueKey,n.open));}
  const previousChart=main.querySelector('.activity-scroll');
@@ -65,6 +68,7 @@ function render(){
  document.body.classList.toggle('count-screen',(localMode||ledger.signedIn)&&!ledger.loading&&!ledger.readOnly&&state.page==='count'&&!state.itemID);
  document.body.classList.toggle('egg-screen',(localMode||ledger.signedIn)&&!ledger.loading&&!ledger.readOnly&&state.page==='egg'&&!state.eggItemID);
  document.querySelector('[data-icon="install"]').innerHTML=icon('install');
+ refreshConcertChrome();
  if(!localMode&&(!ledger.signedIn||ledger.loading)){nav.hidden=true;main.innerHTML=loginView();return;}
  syncRoleAccount();syncWorkspaceFeatures();
  if(!state.books.egg&&state.page==='egg')state.page='count';
@@ -78,8 +82,8 @@ function render(){
   try{main.innerHTML=({count:countView,egg:eggView,history:historyView,stats:statsViewNew,ratio:ratioView,settings:settingsView,match:matchingView}[state.page]||countView)();}
   catch(err){state.eggItemID=null;state.page='count';main.innerHTML=countView();toast('这个页面刚刚没打开，已回到记数页。');}
  }
- if((localMode||ledger.signedIn)&&!ledger.loading){const scope=document.createElement('div');scope.className='workspace-bar';scope.innerHTML=workspaceBar();if(state.page==='settings')main.insertAdjacentHTML('afterbegin',roleSettingsView()+daySettingsView());if(!main.firstElementChild?.classList.contains('count-dashboard'))main.prepend(scope);}
- const currentMatch=main.querySelector('[data-match-scope]');if(currentMatch){if(issueExpansion.scope!==currentMatch.dataset.matchScope)issueExpansion={scope:currentMatch.dataset.matchScope,states:new Map()};currentMatch.querySelectorAll('[data-issue-key]').forEach(n=>{if(issueExpansion.states.has(n.dataset.issueKey))n.open=issueExpansion.states.get(n.dataset.issueKey);});if(previousMatchScope===currentMatch.dataset.matchScope)window.scrollTo({top:previousMatchScroll,behavior:'instant'});}
+ if((localMode||ledger.signedIn)&&!ledger.loading){const scope=document.createElement('div');scope.className='workspace-bar';scope.innerHTML=workspaceBar();if(state.page==='settings'){const anchor=main.querySelector('.page-subtitle')||main.querySelector('.page-title');if(anchor)anchor.insertAdjacentHTML('afterend',roleSettingsView()+daySettingsView());else main.insertAdjacentHTML('afterbegin',roleSettingsView()+daySettingsView());}if(!main.firstElementChild?.classList.contains('count-dashboard'))main.prepend(scope);}
+ const currentMatch=main.querySelector('[data-match-scope]');if(currentMatch){if(issueExpansion.scope!==currentMatch.dataset.matchScope)issueExpansion={scope:currentMatch.dataset.matchScope,states:new Map()};currentMatch.querySelectorAll('[data-issue-key]').forEach(n=>{if(issueExpansion.states.has(n.dataset.issueKey))n.open=issueExpansion.states.get(n.dataset.issueKey);});if(previousMatchScope===currentMatch.dataset.matchScope){window.scrollTo({top:previousMatchScroll,behavior:'instant'});main.scrollTop=previousMainScroll;}}
  layoutVars();fitItemGrid();
  const currentDashboard=main.querySelector('.count-dashboard');
  if(previousScroll&&currentDashboard?.dataset.scope===previousScope){const grid=currentDashboard.querySelector('.item-grid');if(grid)grid.scrollTop=previousScroll;}
@@ -92,6 +96,16 @@ function render(){
   }
  }
  fitEggGrid();animateEggRecommendation();refreshEggPlan();if(!roleRequired){queueEggPlanSync();queueReconciliationStart();}refreshReconciliationDetail();queueOnboarding();
+}
+function refreshConcertChrome(){
+ const active=Boolean(localMode||ledger.signedIn)&&!ledger.loading,theme=concertTheme({signedIn:active&&!localMode,workspace:ledger.workspace,dailyRoom:dailyRoom(),today:beijingDay()}),art=themeAssets[theme];
+ document.body.dataset.concertTheme=theme;document.body.classList.toggle('concert-authenticated',active);
+ const controls=active?(localMode?'<button class="small-button" data-action="cloud-mode">本机体验 · 登录</button>':workspaceControls()):'';
+ document.querySelector('.concert-header-scope').innerHTML=controls;
+ document.querySelector('.concert-breadcrumb').innerHTML=active?`${e(art?.name||workspaceLabel())}<span>/</span><strong>${TAB_LABELS[state.page]||'记数'}</strong>`:'拆弹专家';
+ document.querySelector('#concert-sidebar').innerHTML=`<a class="brand" href="#count"><img class="brand-mark" src="./assets/concert/mars-mark.webp" alt="火星演唱会标志"><span>拆弹专家<small>MARS CONCERT</small></span></a><div class="concert-side-scope">${controls}</div><small class="concert-work-label">工作台</small><div class="concert-side-foot"><span>${e(art?.name||'个人 / 普通组队')}</span><small>${art?.english||'拆弹专家'}</small><button class="small-button" data-action="role-select">切换岗位 / 位置</button></div>`;
+ const rail=document.querySelector('#concert-rail');rail.hidden=!active||!art;rail.innerHTML=art?`<div class="concert-poster"><img src="${art.poster}" alt="火星演唱会${theme==='angel'?'白':'黑'}歌单海报"><div><small>MARS CONCERT / ${art.english}</small><strong>${e(art.name)}</strong></div></div><section class="concert-rail-panel"><strong>${e(ledger.workspace?.name||art.name)}</strong><p>${dailyRoom()?.role==='place'?'投蛋岗位':'拆弹岗位'} · ${e(timeBadge(false))}</p><button class="list-button" data-action="page" data-page="match">今日匹配比对 ${icon('arrow')}</button></section>`:'';
+ document.querySelector('meta[name="theme-color"]').content=theme==='devil'?'#180f1a':'#ffffff';
 }
 function isTutorialTestAccount(){return !localMode&&ledger.user?.username==='123';}
 function roleStorageKey(){return 'little-tally-onboarding:'+(localMode?'local':ledger.user?.id);}
@@ -133,8 +147,8 @@ function showRoleChoice(required=false){
  if(ledger.saving||orderSaving||roleBusy){toast('请等当前保存完成后再切换岗位。');return;}
  clearTutorialHighlight();tutorialRole=null;if(sheet.open)closeSheet();onboarding.dataset.mode='role';onboarding.dataset.required=required?'1':'0';
  const test=isTutorialTestAccount(),kinds=localMode?[null]:['angel','devil'];
- const choices=kinds.map(kind=>`<section class="role-family">${kind?`<h3>${kind==='angel'?'天使':'恶魔'}大群</h3>`:''}<div class="role-options">${[true,false].flatMap(newbie=>['dismantle','place'].map(role=>`<button type="button" class="role-option ${newbie?'':'experienced'}" data-role-choice="${role}" data-room-kind="${kind||''}" data-newbie="${newbie?'1':'0'}"><span><strong>${newbie?'新手':'老手'} · ${ROLES[role].name}</strong><small>${newbie?'查看详细教程':'直接开始，不看教程'}</small></span>${icon('arrow')}</button>`)).join('')}</div></section>`).join('');
- onboarding.innerHTML=`<div class="onboarding-brand"><img src="./icon-192.png" alt=""><span>拆弹专家 · ${test?'教程测试':'岗位选择'}</span></div><h2 id="onboarding-title">今天负责什么？</h2><p class="onboarding-intro">${test?'账号 123 每次打开都会重新选择。':'选择天使或恶魔，进入今天对应的大群。'}</p>${choices}<button type="button" class="role-option keep-workspace" data-role-choice="keep"><span><strong>不加入任何群聊</strong><small>保持之前使用的账本和功能</small></span>${icon('arrow')}</button><p class="role-note">拆弹负责销售、拆弹库存；投蛋负责放蛋，可另开独立库存清点。两岗都能查看今日对账。</p><p class="onboarding-error" role="alert"></p>${required?'':'<button type="button" class="small-button onboarding-cancel" data-onboard="cancel">暂不切换</button>'}`;
+ const choices=kinds.map(kind=>`<section class="role-family" data-concert-kind="${kind||'plain'}">${kind?`<div class="concert-role-cover"><small>${kind==='angel'?'WHITE PLAYLIST':'BLACK PLAYLIST'}</small><h3>${kind==='angel'?'天使':'恶魔'}集装箱</h3></div>`:''}<div class="role-options">${[true,false].flatMap(newbie=>['dismantle','place'].map(role=>`<button type="button" class="role-option ${newbie?'':'experienced'}" data-role-choice="${role}" data-room-kind="${kind||''}" data-newbie="${newbie?'1':'0'}"><span><strong>${newbie?'新手':'老手'} · ${ROLES[role].name}</strong><small>${newbie?'查看详细教程':'直接开始，不看教程'}</small></span>${icon('arrow')}</button>`)).join('')}</div></section>`).join('');
+ onboarding.innerHTML=`<div class="onboarding-brand"><img src="./assets/concert/mars-mark.webp" alt=""><span>拆弹专家 · ${test?'教程测试':'岗位选择'}</span></div><h2 id="onboarding-title">你今天在哪个位置？</h2><p class="onboarding-intro">${test?'账号 123 每次打开都会重新选择。':'选择天使或恶魔，进入今天对应的大群。'}</p><div class="concert-role-families">${choices}</div><button type="button" class="role-option keep-workspace" data-role-choice="keep"><span><strong>不加入任何群聊</strong><small>保持之前使用的账本和功能</small></span>${icon('arrow')}</button><p class="role-note">拆弹负责销售、拆弹库存；投蛋负责放蛋，可另开独立库存清点。两岗都能查看今日对账。</p><p class="onboarding-error" role="alert"></p>${required?'':'<button type="button" class="small-button onboarding-cancel" data-onboard="cancel">暂不切换</button>'}`;
  if(!onboarding.open)onboarding.showModal();onboarding.scrollTop=0;
 }
 function showTutorial(role,step=0){
@@ -200,6 +214,7 @@ function fitItemGrid(){
  const count=grid.children.length,{width,height}=grid.getBoundingClientRect();if(!width||!height)return;
  const style=getComputedStyle(grid),gap=parseFloat(style.rowGap)||0,minWidth=94,minHeight=parseFloat(style.getPropertyValue('--item-min-row'));
  const maxColumns=Math.max(1,Math.min(6,Math.floor((width+gap)/(minWidth+gap))));
+ if(count<=12){const columns=Math.min(maxColumns,window.innerWidth<=760?3:4),rows=Math.ceil(count/columns);grid.style.setProperty('--item-columns',columns);grid.style.setProperty('--item-rows',rows);grid.classList.toggle('item-grid-scroll',height<rows*minHeight+(rows-1)*gap);return;}
  let best=null;
  for(let columns=1;columns<=maxColumns;columns++){
   const rows=Math.ceil(count/columns),w=(width-gap*(columns-1))/columns,h=(height-gap*(rows-1))/rows;
@@ -211,11 +226,11 @@ function fitItemGrid(){
  grid.classList.toggle('item-grid-scroll',best.overflow>0);
 }
 function layoutVars(){
- const height=Math.round(nav.getBoundingClientRect().height);
- document.documentElement.style.setProperty('--nav-h',(height>0?height:64)+'px');
+ const height=window.innerWidth>760?0:Math.round(nav.getBoundingClientRect().height);
+ document.documentElement.style.setProperty('--nav-h',(window.innerWidth>760?0:height>0?height:64)+'px');
 }
 new ResizeObserver(()=>{layoutVars();fitItemGrid();fitEggGrid();if(state.page==='match')drawMatchingLines(main);}).observe(main);
-function loginView(){const registering=state.authMode==='register';return `<section class="hero login-hero"><img class="login-mars-mark" src="./icon-192.png" alt="火星演唱会标志"><div><h1>拆弹专家</h1><p class="login-description">放蛋 · 销售记数 · 库存点数</p></div></section><section class="panel login-panel"><h2>${ledger.loading?'正在打开你的账本…':registering?'注册账户':'登录账户'}</h2><p class="inline-caption">${registering?'只需用户名和密码，不需要邮箱。':'用用户名和密码，打开自己的账本。'}</p>${ledger.error?`<div class="soft-message error">${e(ledger.error)}</div>`:''}${!ledger.loading?`<form id="account-form"><label class="field-label" for="account-username">用户名</label><input class="field-input" id="account-username" name="username" type="text" autocapitalize="none" spellcheck="false" autocomplete="username" placeholder="3–24 位字母、数字或下划线" minlength="3" maxlength="24" pattern="[A-Za-z0-9_]{3,24}" required ${ledger.configured?'':'disabled'}><label class="field-label" style="margin-top:18px" for="account-password">密码</label><input class="field-input" id="account-password" name="password" type="password" autocomplete="${registering?'new-password':'current-password'}" placeholder="${registering?'至少 6 位，可用纯数字或纯字母':'请输入密码'}" ${registering?'minlength="6"':''} maxlength="128" required ${ledger.configured?'':'disabled'}>${registering?'<label class="field-label" style="margin-top:18px" for="account-confirm">确认密码</label><input class="field-input" id="account-confirm" name="confirm" type="password" autocomplete="new-password" placeholder="再输入一次密码" minlength="6" maxlength="128" required>':''}<button class="primary-button" type="submit" style="margin-top:22px" ${ledger.configured?'':'disabled'}>${icon('shield')}${registering?'注册并进入':'登录'}</button><p class="hint">用户名不区分大小写。${registering?'请保存好用户名和密码；此版本不通过邮箱找回密码。':'不同账户的记录单独保存。'}</p><div id="account-message" class="sheet-error" role="status"></div></form><button class="small-button" style="width:100%;margin-top:14px" data-action="auth-mode">${registering?'已有账户？去登录':'还没有账户？注册一个'}</button>${!ledger.configured?'<div class="soft-message warn">账户服务正在准备中，暂时不能注册或同步云端记录。</div>':''}`:''}</section><section class="panel" style="margin-top:18px"><button class="small-button" style="width:100%" data-action="check-connection">检查连接</button><div id="connection-message" class="hint" role="status" style="white-space:pre-line">遇到打不开、注册或登录失败时，可检查当前网络。</div></section><div class="login-features"><span>${icon('check')}独立账户</span><span>${icon('check')}云端保存</span><span>${icon('check')}随时导出</span></div><p class="hint" style="text-align:center">已有本机数据？登录后可从设置导入备份。</p><button class="small-button" style="width:100%;margin-top:14px" data-action="local-mode">本机体验（不含云端同步）</button>`;}
+function loginView(){const registering=state.authMode==='register';return `<section class="hero login-hero"><img class="login-mars-mark" src="./assets/concert/mars-mark.webp" alt="火星演唱会标志"><div><h1>拆弹专家</h1><p class="login-description">放蛋 · 销售记数 · 库存点数</p></div></section><section class="panel login-panel"><h2>${ledger.loading?'正在打开你的账本…':registering?'注册账户':'登录账户'}</h2><p class="inline-caption">${registering?'只需用户名和密码，不需要邮箱。':'用用户名和密码，打开自己的账本。'}</p>${ledger.error?`<div class="soft-message error">${e(ledger.error)}</div>`:''}${!ledger.loading?`<form id="account-form"><label class="field-label" for="account-username">用户名</label><input class="field-input" id="account-username" name="username" type="text" autocapitalize="none" spellcheck="false" autocomplete="username" placeholder="3–24 位字母、数字或下划线" minlength="3" maxlength="24" pattern="[A-Za-z0-9_]{3,24}" required ${ledger.configured?'':'disabled'}><label class="field-label" style="margin-top:18px" for="account-password">密码</label><input class="field-input" id="account-password" name="password" type="password" autocomplete="${registering?'new-password':'current-password'}" placeholder="${registering?'至少 6 位，可用纯数字或纯字母':'请输入密码'}" ${registering?'minlength="6"':''} maxlength="128" required ${ledger.configured?'':'disabled'}>${registering?'<label class="field-label" style="margin-top:18px" for="account-confirm">确认密码</label><input class="field-input" id="account-confirm" name="confirm" type="password" autocomplete="new-password" placeholder="再输入一次密码" minlength="6" maxlength="128" required>':''}<button class="primary-button" type="submit" style="margin-top:22px" ${ledger.configured?'':'disabled'}>${icon('shield')}${registering?'注册并进入':'登录'}</button><p class="hint">用户名不区分大小写。${registering?'请保存好用户名和密码；此版本不通过邮箱找回密码。':'不同账户的记录单独保存。'}</p><div id="account-message" class="sheet-error" role="status"></div></form><button class="small-button" style="width:100%;margin-top:14px" data-action="auth-mode">${registering?'已有账户？去登录':'还没有账户？注册一个'}</button>${!ledger.configured?'<div class="soft-message warn">账户服务正在准备中，暂时不能注册或同步云端记录。</div>':''}`:''}</section><section class="panel" style="margin-top:18px"><button class="small-button" style="width:100%" data-action="check-connection">检查连接</button><div id="connection-message" class="hint" role="status" style="white-space:pre-line">遇到打不开、注册或登录失败时，可检查当前网络。</div></section><div class="login-features"><span>${icon('check')}独立账户</span><span>${icon('check')}云端保存</span><span>${icon('check')}随时导出</span></div><p class="hint" style="text-align:center">已有本机数据？登录后可从设置导入备份。</p><button class="small-button" style="width:100%;margin-top:14px" data-action="local-mode">本机体验（不含云端同步）</button>`;}
 
 function pageHeading(eyebrow,name,subtitle){return `<h1 class="page-title">${e(name)}</h1>${subtitle?`<p class="page-subtitle">${e(subtitle)}</p>`:''}`;}
 function empty(name='这里还没有记录',hint='添加物品后开始记录。'){return `<div class="empty">${icon('leaf')}<strong>${name}</strong><p>${hint}</p></div>`;}
@@ -225,13 +240,13 @@ function countView(){
  const b=book(),c=C.counts(b),total=C.sum(Object.values(c)),sales=state.book==='sales';
  const lastSaleId=sales?b.records.reduce((last,r)=>!last||r.at>=last.at?r:last,null)?.itemId:null;
  const scope=JSON.stringify([ledger.user?.id,ledger.workspace?.id,state.book]),scopeLabel=workspaceLabel();
- const totalText=fmt(total);
+ const totalText=fmt(total),bookSwitchMarkup=books.length>1?`<div class="book-switch" aria-label="选择账本">${books.map(k=>`<button class="${state.book===k?'active':''}" data-action="book" data-book="${k}" aria-pressed="${state.book===k}">${k==='sales'?'销售':'库存'}</button>`).join('')}</div>`:'';
  return `<section class="count-dashboard ${sales?'count-sales':'count-stock'}" data-scope="${e(scope)}">
  <header class="count-summary"><h1>${sales?'销售总数':dailyRoom()?.role==='place'?'投蛋库存总数':'库存总数'} <strong class="${totalText.length>8?'long':''}" data-testid="total">${totalText}<small>件</small></strong></h1>
- ${localMode?'<button class="small-button count-scope" data-action="cloud-mode">本机体验 · 登录</button>':workspaceControls()}</header>
- ${state.bundle?bundleView():`<div class="count-topbar">${books.length>1?`<div class="book-switch" aria-label="选择账本">${books.map(k=>`<button class="${state.book===k?'active':''}" data-action="book" data-book="${k}" aria-pressed="${state.book===k}">${k==='sales'?'销售':'库存'}</button>`).join('')}</div>`:''}<button class="small-button count-copy" data-action="copy-count-report">${icon('copy')}${sales?'复制销售':'复制库存'}</button>${sales?'<button class="small-button" data-action="bundle-start">多蛋购买</button>':''}<button class="small-button" data-action="manage" aria-label="管理物品">管理</button></div>`}
+ ${bookSwitchMarkup}</header>
+ ${state.bundle?bundleView():`<div class="count-topbar"><button class="small-button count-copy" data-action="copy-count-report">${icon('copy')}${sales?'复制销售':'复制库存'}</button>${sales?'<button class="small-button" data-action="bundle-start">多蛋购买</button>':''}<button class="small-button" data-action="manage" aria-label="管理物品">物品管理</button></div>`}
  ${goalBanner(b)}
- ${b.items.length?`<div class="item-grid">${b.items.map(i=>`<article class="item-card${i.id===lastSaleId?' sales-flash':''}" data-item="${e(i.id)}"><button class="item-name" data-action="detail" data-id="${e(i.id)}"><span class="dot" style="background:${color(i)}"></span><span class="name">${e(i.name)}</span>${icon('arrow')}</button><button class="item-number ${String(c[i.id]).length>6?'long':''}" data-action="edit-count" data-id="${e(i.id)}" aria-label="修改${e(i.name)}数量">${fmt(c[i.id])}</button>${state.book==='stock'&&Object.keys(i.breakdown).length?`<div class="item-parts">${Object.entries(i.breakdown).map(([k,v])=>`${e(k)} ${fmt(v)}`).join(' · ')}</div>`:''}<div class="stepper"><button class="minus" data-action="decrease" data-id="${e(i.id)}" aria-label="${e(i.name)}减一" ${c[i.id]===0?'disabled':''}>${icon('minus')}</button><button class="plus" data-action="increase" data-id="${e(i.id)}" aria-label="${e(i.name)}加一">${icon('plus')}</button></div></article>`).join('')}</div>`:`<div class="count-empty"><button class="small-button" data-action="add-item">${icon('plus')}添加物品</button></div>`}
+ ${b.items.length?`<div class="item-grid">${b.items.map(i=>`<article class="item-card${i.id===lastSaleId?' sales-flash':''}" data-item="${e(i.id)}"><button class="item-name" data-action="detail" data-id="${e(i.id)}"><span class="dot" style="background:${color(i)}"></span><span class="name">${e(i.name)}</span>${i.id===lastSaleId?'<span class="concert-flag">上次</span>':''}</button><div class="concert-item-center"><button class="item-number ${String(c[i.id]).length>6?'long':''}" data-action="edit-count" data-id="${e(i.id)}" aria-label="修改${e(i.name)}数量">${fmt(c[i.id])}</button>${productMarkup(i.name)}</div>${state.book==='stock'&&Object.keys(i.breakdown).length?`<div class="item-parts">${Object.entries(i.breakdown).map(([k,v])=>`${e(k)} ${fmt(v)}`).join(' · ')}</div>`:''}<div class="stepper"><button class="minus" data-action="decrease" data-id="${e(i.id)}" aria-label="${e(i.name)}减一" ${c[i.id]===0?'disabled':''}>${icon('minus')}</button><button class="plus" data-action="increase" data-id="${e(i.id)}" aria-label="${e(i.name)}加一">${icon('plus')}<small>1</small></button></div></article>`).join('')}<button type="button" class="concert-add-card" data-action="manage">${icon('plus')}<strong>添加 / 管理物品</strong><small>长按卡片拖动排序</small></button></div>`:`<div class="count-empty"><button class="small-button" data-action="add-item">${icon('plus')}添加物品</button></div>`}
  <p class="count-save green" role="status">${icon('check')}<span>${e(timeBadge(false))}</span>${sales||dailyRoom()?reconciliationStatus():''}</p></section>`;
 }
 function goalBanner(b){if(!b.goal)return '';try{const p=C.ratioPlan(b,b.goal);return `<div class="soft-message"><b>${p.added===0?'✓ 固定目标已达标':'◎ 固定目标 · 还需补充'}</b><div class="goal-chips">${b.items.filter(i=>p.additions[i.id]>0).map(i=>`<span>${e(i.name)} +${fmt(p.additions[i.id])}</span>`).join('')}${p.other>0?`<span>其他物品合计 +${fmt(p.other)}</span>`:''}</div></div>`;}catch{return '<div class="soft-message warn">固定目标需要调整，请到比例页查看。</div>';}}
@@ -427,8 +442,8 @@ function eggCard(p,egg){
  const item=egg.items.find(i=>i.id===p.id)||{};
  return `<article class="egg-card${flash?' flash':''}${state.eggPick?.id===p.id?' recommended':''}" data-egg="${e(p.id)}">
   <button class="egg-open" data-action="egg-detail" data-id="${e(p.id)}" aria-label="查看${e(p.name)}的记录">
-   <span class="egg-head"><span class="egg-name">${e(p.name)}</span></span>
-   <strong class="egg-count${p.target>=10000?' wide':''}" title="第 ${p.itemRound} 轮 ${p.itemProgress}/${p.target}，累计 ${p.count} 个"><span class="egg-current">${p.itemProgress}</span><small class="egg-denominator">/${p.target}</small></strong>
+   <span class="egg-head"><span class="egg-name">${e(p.name)}</span>${flash?'<span class="concert-flag">上次</span>':state.eggPick?.id===p.id?'<span class="concert-flag next">推荐</span>':''}</span><span class="concert-item-center">
+   <strong class="egg-count${p.target>=10000?' wide':''}" title="第 ${p.itemRound} 轮 ${p.itemProgress}/${p.target}，累计 ${p.count} 个"><span class="egg-current">${p.itemProgress}</span><small class="egg-denominator">/${p.target}</small></strong>${productMarkup(p.name)}</span>
   </button>
   ${eggProgressBars(p)}
   <div class="egg-foot">
@@ -526,10 +541,10 @@ function eggView(){
  const shown=state.eggOnlyLeft?ids.filter(id=>byId[id].left>0):ids;
  const pickId=eggPickId(egg),pick=pickId?byId[pickId]:null,round=C.eggRound(egg)+1;
  return `<section class="egg-wrap">
-  <div class="egg-statusbar"><img class="egg-mark" src="./icon-192.png" alt="火星演唱会标志"><div class="egg-status"><span data-testid="egg-round">第 <strong>${round}</strong> 轮</span><span data-testid="egg-total">总数 <strong>${fmt(C.eggTotal(egg))}</strong> 个</span></div><div class="egg-header-actions"><button class="small-button egg-copy" data-action="egg-copy-options">一键复制</button><button class="small-button" data-action="egg-totals">查看总数</button><button class="small-button egg-tools" data-action="egg-tools">${icon('settings')+'操作'}</button></div></div>
-  <div class="egg-reco"><button class="egg-reco-main" data-action="egg-plan" aria-label="查看本轮推荐顺序"><span class="eyebrow">${state.eggPick?.alternative?'备选':'推荐'}</span><strong>${pick?e(pick.name):'—'}</strong>${icon('arrow','tiny')}</button><div class="egg-reco-actions">${pick?`<button class="egg-add-main" data-action="egg-add" data-id="${e(pick.id)}">+1</button>`:''}<button class="ghost small" data-action="egg-reroll">换一个</button></div></div>
+  <div class="concert-egg-summary"><div><span>本轮已放</span><strong>${fmt(C.sum(progress.map(p=>p.itemProgress)))}<small>/ ${C.sum(egg.items.map(i=>i.ratio))} 个</small></strong></div><span class="badge" data-testid="egg-round">第 <strong>${round}</strong> 轮</span></div><div class="egg-statusbar"><div class="egg-header-actions"><button class="small-button egg-copy" data-action="egg-copy-options">一键复制</button><button class="small-button" data-action="egg-totals">查看总数</button><button class="small-button egg-tools" data-action="egg-tools">物品管理</button></div></div>
+  <div class="egg-reco"><button class="egg-reco-main" data-action="egg-plan" aria-label="查看本轮推荐顺序"><span class="eyebrow">${state.eggPick?.alternative?'下一个备选':'下一个推荐'}</span><strong>${pick?e(pick.name):'—'}</strong>${icon('arrow','tiny')}</button><div class="egg-reco-actions">${pick?`<button class="egg-add-main" data-action="egg-add" data-id="${e(pick.id)}">+1</button>`:''}<button class="ghost small" data-action="egg-reroll">换一组</button></div></div>
   ${reconciliationStatus()}
-  <div class="egg-grid" data-columns="${state.eggCols}">${shown.length?shown.map(id=>eggCard(byId[id],egg)).join(''):`<p class="egg-none">没有未放满的物品。<button class="small-button" data-action="egg-only">显示全部</button></p>`}</div>
+  <div class="egg-grid" data-columns="${state.eggCols}">${shown.length?shown.map(id=>eggCard(byId[id],egg)).join(''):`<p class="egg-none">没有未放满的物品。<button class="small-button" data-action="egg-only">显示全部</button></p>`}<button type="button" class="concert-add-card" data-action="egg-tools">${icon('plus')}<strong>添加 / 管理物品</strong><small>长按卡片拖动排序</small></button><button type="button" class="concert-add-card concert-plan-tile" data-action="egg-plan"><strong>${C.sum(progress.map(p=>p.left))} <small>个</small></strong><small>本轮剩余 · 查看顺序 →</small></button></div><p class="concert-egg-save"><span data-testid="egg-total">累计总数 ${fmt(C.eggTotal(egg))} 个</span><span>红框上次 · 浅绿框推荐</span></p>
  </section>`;
 }
 function showEggItemManager(){
@@ -559,9 +574,10 @@ function eggRecordLine(r,p){
 }
 function fitEggGrid(){
  const grid=main.querySelector('.egg-grid');if(!grid)return;
- const cards=[...grid.querySelectorAll('.egg-card')],count=cards.length;if(!count)return;
+ const cards=[...grid.querySelectorAll('.egg-card')],count=grid.children.length;if(!cards.length)return;
  const {width,height}=grid.getBoundingClientRect();if(!width||!height)return;
  const gap=parseFloat(getComputedStyle(grid).gap)||6;let best=null;
+ if(count<=14){const columns=Math.max(1,Math.min(window.innerWidth<=760?3:4,Math.floor((width+gap)/(92+gap)))),rows=Math.ceil(count/columns);grid.style.setProperty('--egg-columns',columns);grid.style.setProperty('--egg-rows',rows);grid.classList.toggle('egg-grid-tight',(height-gap*(rows-1))/rows<112);for(const card of cards)card.style.gridColumn='';state.eggCols=columns;return;}
  for(let columns=1;columns<=Math.min(count,6);columns++){
   const rows=Math.ceil(count/columns),w=(width-gap*(columns-1))/columns,h=(height-gap*(rows-1))/rows;
   if(w<92&&columns>1)continue;
@@ -573,7 +589,7 @@ function fitEggGrid(){
  grid.style.setProperty('--egg-columns',best.columns);grid.style.setProperty('--egg-rows',best.rows);
  grid.classList.toggle('egg-grid-tight',(height-gap*(best.rows-1))/best.rows<112);
  for(const card of cards)card.style.gridColumn='';
- const remainder=count%best.columns;if(remainder)cards.at(-1).style.gridColumn='span '+(best.columns-remainder+1);
+ // Keep every item in its own cell; toolbar tiles share the remaining grid cells.
  state.eggCols=best.columns;
 }
 function eggTick(){
@@ -974,3 +990,5 @@ setInterval(()=>{if(document.visibilityState==='visible'&&!sheet.open&&['count',
 setInterval(async()=>{if(!localMode&&ledger.workspace&&ledger.signedIn&&!ledger.saving&&!ledger.loading&&(!sheet.open||Boolean(sheetContent.querySelector('.reconciliation-content')))&&!state.bundle&&!itemDrag?.active&&!orderSaving&&document.visibilityState==='visible'){try{await ledger.reload();}catch{}}},5000);
 
 setInterval(()=>{if(state.page==='match'&&document.visibilityState==='visible'&&!ledger.saving&&!ledger.loading&&!itemDrag?.engaged&&!matchingUI?.saving)queueReconciliationStart(true);},5000);
+
+setInterval(()=>{if(document.visibilityState==='visible')refreshConcertChrome();},30000);

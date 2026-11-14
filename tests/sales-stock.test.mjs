@@ -1,3 +1,4 @@
+import {productMarkup} from '../dist/concert-ui.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
@@ -125,7 +126,7 @@ test('reserved-looking item IDs cannot mutate pair-map prototypes',()=>{
 
 const source=readFileSync(new URL('../dist/app.js',import.meta.url),'utf8');
 test('the actual settings view shows a default-off switch and mapping/part selectors after enabling',()=>{
- const {state}=fixture(),context=vm.createContext({C,ledger:{state,readOnly:false},e:String,fmt:String});
+ const {state}=fixture(),context=vm.createContext({C,dailyRoom:()=>null,ledger:{state,readOnly:false},e:String,fmt:String});
  vm.runInContext(source.slice(source.indexOf('function salesStockSettingsView('),source.indexOf('function localSettingsView(')),context);
  assert.match(context.salesStockSettingsView(),/开启绑定/);assert.match(context.salesStockSettingsView(),/当前关闭/);
  C.setSalesStockEnabled(state,true);const markup=context.salesStockSettingsView();
@@ -154,7 +155,7 @@ test('sales copy uses current card quantities across dates instead of operation 
 test('count screens label their own copy report and only sales highlights the latest recorded item',()=>{
  const {state,sale}=fixture();C.addItem(state.sales,'乙');C.setCount(state.sales,sale,1);
  C.setCount(state.sales,state.sales.items[1].id,1);state.sales.records.at(-1).at-=86400000;
- const ctx=vm.createContext({C,state:{book:'sales',books:{sales:true,stock:true}},ledger:{},workspaceControls:()=>'',reconciliationStatus:()=>'',workspaceLabel:()=>'',book:()=>state.sales,fmt:String,e:String,localMode:false,icon:()=>'',
+ const ctx=vm.createContext({C,productMarkup,dailyRoom:()=>null,state:{book:'sales',books:{sales:true,stock:true}},ledger:{},workspaceControls:()=>'',reconciliationStatus:()=>'',workspaceLabel:()=>'',book:()=>state.sales,fmt:String,e:String,localMode:false,icon:()=>'',
   color:()=>'',goalBanner:()=>'',empty:()=>'',timeBadge:()=>''});
  vm.runInContext(source.slice(source.indexOf('function countView('),source.indexOf('function goalBanner(')),ctx);
  const salesMarkup=ctx.countView();assert.match(salesMarkup,/data-action="copy-count-report"/);assert.equal((salesMarkup.match(/sales-flash/g)||[]).length,1);
