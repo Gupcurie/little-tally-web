@@ -73,11 +73,13 @@ body[data-concert-theme=devil] .match-board,body[data-concert-theme=devil] .matc
 @media(max-width:760px) and (max-height:680px){.egg-card .egg-timer{display:none}.egg-card{min-height:85px}.count-dashboard .item-name{font-size:10px}.egg-wrap>.reconcile-status{font-size:8px;min-height:18px;padding:0 4px}}
 @media(prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
 
-/* Larger merchandise illustrations; flexible space prevents overlap with real quantities. */
-.concert-product{position:relative;inset:auto;align-self:stretch;flex:1 1 0;min-width:0;width:auto;max-width:min(52%,130px);margin-left:auto}
-.concert-product img{position:absolute;left:0;top:-2px;width:100%;height:calc(100% + 4px)}
-.egg-card .concert-product{width:auto;max-width:min(48%,100px);margin-left:auto}
-@media(max-width:760px){.concert-product{width:auto;max-width:min(52%,86px);margin-left:auto}.egg-card .concert-product{width:auto;max-width:48%}}
-@media(max-width:360px){.egg-card .concert-product{width:auto;max-width:43%}}
-
+/* Larger illustrations use the right-side title gap without narrowing the controls. */
+.count-dashboard .item-name .name{max-width:56%}
+.egg-card .egg-name{max-width:55%}
+.concert-product{position:relative;inset:auto;align-self:stretch;flex:1 1 0;min-width:0;width:auto;max-width:min(60%,150px);margin-left:auto}
+.concert-product img{position:absolute;left:0;top:-10px;width:100%;height:calc(100% + 10px)}
+.egg-card .concert-product{width:auto;max-width:min(54%,120px);margin-left:auto}
+.egg-card .concert-product img{top:-8px;height:calc(100% + 8px)}
 .concert-item-center > .item-number,.egg-card .egg-count{margin-right:3px}
+@media(max-width:760px){.concert-product{width:auto;max-width:min(60%,100px);margin-left:auto}.egg-card .concert-product{width:auto;max-width:54%}}
+@media(max-width:360px){.egg-card .concert-product{width:auto;max-width:49%}}
