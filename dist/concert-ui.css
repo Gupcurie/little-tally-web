@@ -72,3 +72,12 @@ body[data-concert-theme=devil] .match-board,body[data-concert-theme=devil] .matc
 @media(max-width:760px) and (max-height:760px){.app-header,.count-screen .app-header,.egg-screen .app-header{height:57px;min-height:57px}.count-screen main,.egg-screen main{padding-top:7px}.count-dashboard{gap:6px}.count-summary{min-height:35px}.count-summary h1 strong{font-size:29px}.count-topbar,.count-topbar .small-button{min-height:32px}.count-dashboard .item-card{padding:6px;gap:3px}.count-dashboard .stepper button{height:38px;min-height:38px}.count-dashboard .item-grid{--item-min-row:91;gap:5px}.count-dashboard .item-grid.item-grid-scroll{grid-template-rows:repeat(var(--item-rows,4),minmax(91px,1fr))}.count-dashboard .item-number{font-size:25px}.bottom-nav{padding-top:4px;padding-bottom:4px}.bottom-nav button{min-height:45px}.egg-wrap{gap:5px}.concert-egg-summary{min-height:31px}.concert-egg-summary>div>strong{font-size:25px}.egg-statusbar,.egg-header-actions .small-button{min-height:32px}.egg-reco{min-height:52px;padding:7px 10px}.egg-grid{gap:5px}.egg-card{min-height:91px;padding:5px;gap:2px}.egg-card .egg-head{min-height:14px}.egg-card .egg-count{font-size:21px}.egg-card .egg-pair button{height:33px;min-height:33px}.egg-card .egg-timer{font-size:7px}.concert-egg-save{font-size:7px}.concert-add-card small{font-size:6px}.concert-plan-tile strong{font-size:18px}}
 @media(max-width:760px) and (max-height:680px){.egg-card .egg-timer{display:none}.egg-card{min-height:85px}.count-dashboard .item-name{font-size:10px}.egg-wrap>.reconcile-status{font-size:8px;min-height:18px;padding:0 4px}}
 @media(prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
+
+/* Larger merchandise illustrations; flexible space prevents overlap with real quantities. */
+.concert-product{position:relative;inset:auto;align-self:stretch;flex:1 1 0;min-width:0;width:auto;max-width:min(52%,130px);margin-left:auto}
+.concert-product img{position:absolute;left:0;top:-2px;width:100%;height:calc(100% + 4px)}
+.egg-card .concert-product{width:auto;max-width:min(48%,100px);margin-left:auto}
+@media(max-width:760px){.concert-product{width:auto;max-width:min(52%,86px);margin-left:auto}.egg-card .concert-product{width:auto;max-width:48%}}
+@media(max-width:360px){.egg-card .concert-product{width:auto;max-width:43%}}
+
+.concert-item-center > .item-number,.egg-card .egg-count{margin-right:3px}
